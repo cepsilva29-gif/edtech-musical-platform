@@ -2,9 +2,9 @@
 
 Backend NestJS + TypeScript (API REST versionada `/api/v1`).
 
-**Status:** banco de dados (FASE 2), backend + autenticação (FASE 3) e catálogo — instrumentos,
-cursos, módulos e aulas (FASE 4) implementados. Progresso/controle de acesso, assinaturas,
-pagamentos e lives chegam nas fases seguintes.
+**Status:** banco de dados (FASE 2), backend + autenticação (FASE 3), catálogo — instrumentos,
+cursos, módulos e aulas (FASE 4) e controle de acesso + progresso (FASE 5) implementados.
+Assinaturas/pagamentos, lives e player chegam nas fases seguintes.
 
 ## Banco de dados (Prisma) — FASE 2
 
@@ -97,6 +97,37 @@ Endpoints (`/api/v1/...`, todos com Bearer):
 Listagens aceitam paginação (`page`, `limit`, padrão 20, máx. 100) e filtros por status/nível/busca
 conforme o recurso — ver `GET /docs` (Swagger) para o contrato completo de cada DTO.
 
+## Controle de acesso e progresso — FASE 5
+
+Módulos implementados: **access-control**, **progress**.
+
+`AccessControlService.hasActiveEntitlement(userId)` decide se um usuário tem uma assinatura
+`ACTIVE`/`TRIALING` vigente, lendo a tabela `user_subscriptions` já modelada na FASE 2. A criação
+real de assinaturas (checkout, gateway, webhook) é da FASE 6 — por enquanto o estado é atribuído
+manualmente (ver seed) ou via `PATCH` direto no banco/admin. Decisão 17 em `docs/ARCHITECTURE.md`.
+
+Com base nisso:
+
+- **Materiais de aula** (`lesson-materials`, FASE 4) passam a exigir assinatura ativa para quem não
+  gerencia o curso — admin/professor dono continuam com acesso total (decisão 18). Metadado de
+  catálogo (`instruments`/`courses`/`course-modules`/`lessons`) **não** foi alterado — continua só
+  exigindo autenticação (decisão 13).
+- **Progresso do aluno** (`progress`) grava `watched_seconds`/`last_position_seconds` por aula,
+  exigindo o mesmo gate de assinatura (ou ser dono/admin) para gravar. Leitura do próprio progresso
+  não exige assinatura (é inofensiva e normalmente vazia se nunca houve acesso). `watched_seconds`
+  nunca regride (usa o maior valor já visto) e a aula é marcada concluída automaticamente ao
+  atingir 90% da duração cadastrada — decisão 19.
+
+Endpoints (`/api/v1/...`, todos com Bearer):
+
+| Método | Rota                                   | Observação                                          |
+| ------ | -------------------------------------- | --------------------------------------------------- |
+| GET    | `/access/me`                           | `{ hasActiveEntitlement }` do usuário autenticado   |
+| GET    | `/lessons/:lessonId/progress`          | progresso do usuário na aula (não exige assinatura) |
+| PUT    | `/lessons/:lessonId/progress`          | upsert de `watchedSeconds`/`lastPositionSeconds`    |
+| POST   | `/lessons/:lessonId/progress/complete` | marca a aula como concluída manualmente             |
+| GET    | `/courses/:courseId/progress`          | resumo agregado (por módulo/aula) do curso          |
+
 ### Como rodar
 
 ```bash
@@ -104,18 +135,19 @@ cd apps/api
 cp .env.example .env          # ajuste DATABASE_URL e troque JWT_SECRET/JWT_REFRESH_SECRET
 npm install                   # (se ainda nao rodou na raiz do monorepo)
 npm run prisma:migrate:dev    # aplica as 2 migrations num banco vazio
-npm run prisma:seed           # popula instrumentos, papeis e usuarios de dev
+npm run prisma:seed           # popula instrumentos, papeis, usuarios de dev, plano/assinatura
+                               # ACTIVE do aluno e um curso de exemplo publicado
 npm run start:dev             # sobe a API em http://localhost:3000 (Swagger em /docs)
 ```
 
 > **Nota de ambiente:** este projeto foi desenvolvido em uma sandbox sem PostgreSQL nem acesso de
 > rede de saída disponíveis. O que **foi** verificado de fato: `prisma validate`/`generate`,
 > `tsc --noEmit`, `nest build` (gera `dist/main.js` funcional), lint limpo, `prettier --check` limpo
-> e os 15 testes unitários (`npm test`) — todos passando. O que **não** foi possível verificar aqui:
-> subir a API contra um Postgres real e exercitar os endpoints (auth e catálogo) ponta a ponta — ao
-> tentar, o processo trava indefinidamente na conexão TCP do Prisma (a sandbox bloqueia a rede em
+> e os 18 testes unitários (`npm test`) — todos passando. O que **não** foi possível verificar aqui:
+> subir a API contra um Postgres real e exercitar os endpoints (auth, catálogo e progresso) ponta a
+> ponta — ao tentar, o processo trava indefinidamente na conexão TCP do Prisma (a sandbox bloqueia a rede em
 > vez de recusar a conexão, então nem timeout aparece). Rode os comandos acima no seu ambiente para
-> validar o fluxo completo antes de seguir para a FASE 5.
+> validar o fluxo completo antes de seguir para a FASE 6.
 
 Credenciais de desenvolvimento criadas pelo seed (senha única: `Dev@12345`):
 
@@ -131,10 +163,11 @@ Credenciais de desenvolvimento criadas pelo seed (senha única: `Dev@12345`):
 npm test
 ```
 
-15 testes unitários: `RolesGuard` (RBAC), `resolveErrorBody` (garante que erros internos não vazam
-detalhe em produção) e `catalog-visibility.util` (regras puras de propriedade/publicação do
-catálogo, FASE 4). Testes de integração para os fluxos de auth e catálogo (contra um Postgres real)
-ficam para a FASE 12, conforme o roadmap do prompt-mestre.
+18 testes unitários: `RolesGuard` (RBAC), `resolveErrorBody` (garante que erros internos não vazam
+detalhe em produção), `catalog-visibility.util` (regras puras de propriedade/publicação do
+catálogo, FASE 4) e `AccessControlService` (regra de entitlement, FASE 5). Testes de integração
+para os fluxos de auth/catálogo/progresso (contra um Postgres real) ficam para a FASE 12, conforme
+o roadmap do prompt-mestre.
 
 ## Estrutura atual
 
@@ -147,7 +180,9 @@ src/
   courses/           CRUD de cursos (FASE 4)
   course-modules/    CRUD de modulos de curso (entidade Module) (FASE 4)
   lessons/           CRUD de aulas (FASE 4)
-  lesson-materials/  CRUD de materiais de aula (FASE 4)
+  lesson-materials/  CRUD de materiais de aula (FASE 4, gate de assinatura na FASE 5)
+  access-control/    AccessControlService (entitlement) + GET /access/me (FASE 5)
+  progress/          progresso do aluno por aula/curso (FASE 5)
   common/            guards, filters, interceptors, decorators, types, utils (paginacao, slug,
                      visibilidade do catalogo)
   mail/              MailService (abstrato) + ConsoleMailService
@@ -158,5 +193,5 @@ src/
 prisma/              schema.prisma, migrations, seed
 ```
 
-Ainda faltam (fases seguintes): `progress`, `live-sessions`, `subscriptions`, `payments`,
-`storage`, `notifications`, `admin`.
+Ainda faltam (fases seguintes): `live-sessions`, `subscriptions` (checkout/gateway real),
+`payments`, `storage` (URL assinada real), `notifications`, `admin`.

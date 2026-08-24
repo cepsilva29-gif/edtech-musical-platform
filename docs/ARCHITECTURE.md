@@ -273,6 +273,66 @@ Cada decisão é registrada como: **decisão → motivo → alternativas conside
 - **Impacto futuro:** nenhum — é só uma convenção de rota; a lógica de propriedade/visibilidade não
   depende de quantos ids aparecem na URL.
 
+## 17. Controle de acesso (FASE 5) consome `user_subscriptions`, mas não cria assinaturas
+
+- **Decisão:** `AccessControlService.hasActiveEntitlement(userId)` consulta a tabela
+  `user_subscriptions` (já modelada na FASE 2) procurando um registro `ACTIVE`/`TRIALING` com
+  `current_period_end` nulo ou no futuro. Nenhum endpoint desta fase cria, atualiza ou cancela uma
+  assinatura — isso é explicitamente escopo da FASE 6 (checkout, gateway, webhooks).
+- **Motivo:** a ordem do roadmap coloca "Controle de acesso e progresso" (FASE 5) antes de
+  "Assinaturas e pagamentos" (FASE 6). Isso só faz sentido se controle de acesso for entendido como
+  "dado um estado de assinatura, decidir o que o usuário pode consumir" — a _leitura_ do
+  entitlement — separado de "como esse estado é produzido", que é a integração real com gateway de
+  pagamento. O schema já suporta essa leitura desde a FASE 2, então não há necessidade de esperar a
+  FASE 6 para implementar a decisão de acesso em si.
+- **Alternativas consideradas:** adiar toda a FASE 5 até a FASE 6 existir (rejeitado — inverteria a
+  ordem do roadmap sem necessidade real, já que o schema de assinatura já está pronto); implementar
+  um mecanismo de acesso paralelo e descartável só para teste (rejeitado — criaria dois caminhos de
+  decisão de acesso para depois unificar, risco de divergência).
+- **Impacto futuro:** quando a FASE 6 implementar o gateway real e os webhooks, `user_subscriptions`
+  passa a ser escrito por um fluxo de pagamento de verdade em vez do seed — `AccessControlService`
+  não muda nenhuma linha, pois já lê exatamente esse estado.
+
+## 18. Materiais de aula exigem assinatura ativa; metadado do catálogo continua aberto
+
+- **Decisão:** `lesson-materials` (listagem e detalhe) agora exige, além de o usuário poder ver a
+  aula, que `AccessControlService.hasActiveEntitlement` retorne verdadeiro — exceto para quem já
+  gerencia o curso (admin/professor dono, que precisa editar materiais independentemente de ter uma
+  assinatura própria). Os endpoints de FASE 4 (`instruments`, `courses`, `course-modules`,
+  `lessons`) **não** mudaram — continuam exigindo só autenticação, sem checar assinatura.
+- **Motivo:** a seção 8 do `docs/00-primeira-entrega.md` já previa isso desde a FASE 1 ("materiais
+  protegidos servidos por URL assinada, gerada sob demanda após validação de acesso — autenticação +
+  assinatura ativa + plano cobre o conteúdo"); a FASE 4 não podia implementar essa checagem porque o
+  mecanismo de acesso ainda não existia. Metadado de curso/aula (título, descrição, duração) segue
+  sem gate porque é material de vitrine (decide-se assinar vendo do que se trata), enquanto o
+  material de apoio (PDF, cifra, partitura) é o "conteúdo" de fato.
+- **Alternativas consideradas:** gatear também a leitura de `lessons`/`courses` (rejeitado —
+  reverteria a decisão 13 da FASE 4 sem necessidade, e tornaria impossível ao aluno decidir assinar
+  vendo a ementa do curso); esperar a FASE 7 (player) para gatear qualquer coisa (rejeitado — a
+  seção 8 já é explícita sobre materiais, e a tabela `lesson_materials` já existe e é servida hoje).
+- **Impacto futuro:** quando o `StorageProvider`/URL assinada de fato existir (fora do roadmap
+  numerado, mas antecipado na seção 8), a geração da URL entra _depois_ desta checagem — o gate de
+  acesso não muda.
+
+## 19. Progresso: métrica monotônica + conclusão automática por percentual assistido
+
+- **Decisão:** `PUT /lessons/:id/progress` nunca reduz `watched_seconds` (usa `Math.max` contra o
+  valor já salvo) e marca a aula como concluída automaticamente quando `watched_seconds >= 90%` de
+  `duration_seconds` (só quando a duração é conhecida, i.e. `> 0`). Existe também
+  `POST /lessons/:id/progress/complete` para marcar conclusão manual (útil quando a duração não foi
+  cadastrada, ou o aluno quer se autodeclarar concluído). `completedAt` nunca é sobrescrito depois de
+  definido.
+- **Motivo:** o player (FASE 7) enviará atualizações de progresso em intervalos, possivelmente fora
+  de ordem (retries de rede, múltiplas abas) — sem o `Math.max`, um evento atrasado com um valor
+  menor apagaria progresso real já registrado. 90% (não 100%) é o limiar comum de "aula concluída"
+  em plataformas de vídeo, absorvendo o fato de que poucos alunos assistem o segundo final exato.
+- **Alternativas consideradas:** sempre sobrescrever `watched_seconds` com o valor recebido
+  (rejeitado — vulnerável a regressão por evento fora de ordem); exigir 100% para concluir
+  (rejeitado — não reflete o comportamento real de consumo de vídeo).
+- **Impacto futuro:** quando o player real existir, ele só precisa chamar `PUT .../progress`
+  periodicamente com `watchedSeconds`/`lastPositionSeconds` — toda a lógica de conclusão já está no
+  backend, nada muda no contrato.
+
 ---
 
 ## Compatibilidade verificada nesta fase

@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { randomUUID } from 'node:crypto';
 import { LoggerModule } from 'nestjs-pino';
+import { AccessControlModule } from './access-control/access-control.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -17,6 +18,7 @@ import { LessonMaterialsModule } from './lesson-materials/lesson-materials.modul
 import { LessonsModule } from './lessons/lessons.module';
 import { MailModule } from './mail/mail.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { ProgressModule } from './progress/progress.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -46,6 +48,8 @@ import { UsersModule } from './users/users.module';
     CourseModulesModule,
     LessonsModule,
     LessonMaterialsModule,
+    AccessControlModule,
+    ProgressModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
