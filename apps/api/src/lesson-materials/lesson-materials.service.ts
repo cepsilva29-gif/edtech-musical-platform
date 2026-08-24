@@ -32,7 +32,10 @@ export class LessonMaterialsService {
   ): Promise<PaginatedResult<LessonMaterial>> {
     const lesson = await this.lessonsService.findWithModuleOrThrow(lessonId);
     this.lessonsService.assertViewable(user, lesson);
-    await this.assertCanConsume(user, lesson);
+    await this.accessControlService.assertEntitled(
+      user.id,
+      this.lessonsService.canManage(user, lesson),
+    );
 
     const where: Prisma.LessonMaterialWhereInput = { lessonId, type: query.type };
 
@@ -51,7 +54,10 @@ export class LessonMaterialsService {
   async findOne(user: AuthenticatedUser, id: string): Promise<LessonMaterial> {
     const material = await this.findWithLessonOrThrow(id);
     this.lessonsService.assertViewable(user, material.lesson);
-    await this.assertCanConsume(user, material.lesson);
+    await this.accessControlService.assertEntitled(
+      user.id,
+      this.lessonsService.canManage(user, material.lesson),
+    );
     return material;
   }
 
@@ -95,20 +101,6 @@ export class LessonMaterialsService {
   private assertManageable(user: AuthenticatedUser, lesson: LessonWithModule): void {
     if (!this.lessonsService.canManage(user, lesson)) {
       throw new ForbiddenException('Voce nao tem permissao para gerenciar este material.');
-    }
-  }
-
-  /** Materiais so ficam liberados para quem gerencia o curso ou tem assinatura ativa (secao 8). */
-  private async assertCanConsume(user: AuthenticatedUser, lesson: LessonWithModule): Promise<void> {
-    if (this.lessonsService.canManage(user, lesson)) {
-      return;
-    }
-
-    const hasAccess = await this.accessControlService.hasActiveEntitlement(user.id);
-    if (!hasAccess) {
-      throw new ForbiddenException(
-        'Assinatura ativa necessaria para acessar os materiais desta aula.',
-      );
     }
   }
 

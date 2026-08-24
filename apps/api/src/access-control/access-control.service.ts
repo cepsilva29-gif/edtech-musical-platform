@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -24,5 +24,23 @@ export class AccessControlService {
     });
 
     return !!subscription;
+  }
+
+  /**
+   * Regra unica de consumo de conteudo premium (materiais, progresso, playback - decisao 18/24):
+   * quem gerencia o curso (admin/professor dono) sempre passa; qualquer outro usuario precisa de
+   * assinatura ativa. `canManage` vem pre-calculado pelo chamador (ex.
+   * `LessonsService.canManage(user, lesson)`) para este servico nao precisar depender do modulo de
+   * catalogo.
+   */
+  async assertEntitled(userId: string, canManage: boolean): Promise<void> {
+    if (canManage) {
+      return;
+    }
+
+    const hasAccess = await this.hasActiveEntitlement(userId);
+    if (!hasAccess) {
+      throw new ForbiddenException('Assinatura ativa necessaria para acessar este conteudo.');
+    }
   }
 }

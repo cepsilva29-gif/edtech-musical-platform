@@ -48,6 +48,20 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   FAKE_PAYMENT_GATEWAY_SECRET = 'dev-fake-gateway-secret';
+
+  @IsString()
+  @IsOptional()
+  VIDEO_PROVIDER = 'fake';
+
+  @IsString()
+  @IsOptional()
+  FAKE_VIDEO_PROVIDER_SECRET = 'dev-fake-video-secret';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  VIDEO_PLAYBACK_URL_TTL_SECONDS = 600;
 }
 
 export function validate(config: Record<string, unknown>): EnvironmentVariables {

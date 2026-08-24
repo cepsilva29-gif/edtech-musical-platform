@@ -18,6 +18,7 @@ import { LessonMaterialsModule } from './lesson-materials/lesson-materials.modul
 import { LessonsModule } from './lessons/lessons.module';
 import { MailModule } from './mail/mail.module';
 import { PaymentsModule } from './payments/payments.module';
+import { PlaybackModule } from './playback/playback.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProgressModule } from './progress/progress.module';
 import { SubscriptionPlansModule } from './subscription-plans/subscription-plans.module';
@@ -56,6 +57,7 @@ import { UsersModule } from './users/users.module';
     SubscriptionPlansModule,
     PaymentsModule,
     SubscriptionsModule,
+    PlaybackModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

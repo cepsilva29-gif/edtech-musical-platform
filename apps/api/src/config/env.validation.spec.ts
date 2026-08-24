@@ -19,6 +19,14 @@ describe('validate (env.validation)', () => {
     expect(config.PORT).toBe(3000);
     expect(config.NODE_ENV).toBe('development');
     expect(config.PAYMENT_PROVIDER).toBe('fake');
+    expect(config.VIDEO_PROVIDER).toBe('fake');
+    expect(config.VIDEO_PLAYBACK_URL_TTL_SECONDS).toBe(600);
+  });
+
+  it('coerces VIDEO_PLAYBACK_URL_TTL_SECONDS from string to number, same as PORT', () => {
+    const config = validate({ ...REQUIRED, VIDEO_PLAYBACK_URL_TTL_SECONDS: '120' });
+    expect(config.VIDEO_PLAYBACK_URL_TTL_SECONDS).toBe(120);
+    expect(typeof config.VIDEO_PLAYBACK_URL_TTL_SECONDS).toBe('number');
   });
 
   it('rejects a PORT outside the valid TCP port range', () => {

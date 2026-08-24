@@ -3,8 +3,10 @@
 Backend NestJS + TypeScript (API REST versionada `/api/v1`).
 
 **Status:** banco de dados (FASE 2), backend + autenticação (FASE 3), catálogo — instrumentos,
-cursos, módulos e aulas (FASE 4), controle de acesso + progresso (FASE 5) e assinaturas/pagamentos
-(FASE 6) implementados. Lives, player e metrônomo/afinador chegam nas fases seguintes.
+cursos, módulos e aulas (FASE 4), controle de acesso + progresso (FASE 5), assinaturas/pagamentos
+(FASE 6) e player de vídeo — resolução de URL assinada (FASE 7) implementados. Lives e metrônomo/
+afinador chegam nas fases seguintes; o player embutido em si (HLS.js/`react-native-video`) só
+existe quando `apps/admin`/`apps/mobile` forem criados (decisão 26).
 
 ## Banco de dados (Prisma) — FASE 2
 
@@ -179,13 +181,42 @@ Endpoints (`/api/v1/...`):
 > ao corpo original. Antes de plugar um gateway real, esta rota precisa de captura de raw body
 > (`bodyParser: false` + middleware dedicado nesta rota, conforme a documentação do NestJS).
 
+## Player de vídeo — FASE 7
+
+Módulos implementados: **video** (`VideoProvider` + `FakeVideoProvider`), **playback**.
+
+`GET /lessons/:id/playback` resolve a URL de reprodução de uma aula (`videoRef` → URL HLS
+assinada, de curta duração), aplicando exatamente a mesma regra de acesso de materiais/progresso —
+agora centralizada em `AccessControlService.assertEntitled()` (decisão 24, extraída depois da
+terceira duplicação): quem gerencia o curso sempre pode gerar a URL; qualquer outro usuário precisa
+de assinatura ativa. Aula sem `videoRef` cadastrado retorna `409`.
+
+**Somente `VIDEO_PROVIDER=fake` está implementado nesta fase** (`FakeVideoProvider`, mesmo padrão
+de `FakePaymentGateway`/`ConsoleMailService` — decisão 25): nunca chama nenhuma API externa, gera
+uma URL fictícia assinada por HMAC com expiração de `VIDEO_PLAYBACK_URL_TTL_SECONDS` (padrão 600s)
+e loga a ação (`[DEV VIDEO] ...`). Um provedor real (Mux/AWS IVS/YouTube Live) entra depois
+implementando a mesma interface, sem mudar `PlaybackService`.
+
+**Escopo desta fase é só o backend** (decisão 26): o player embutido de verdade — HLS.js/Video.js
+no admin, `expo-av`/`react-native-video` no mobile, controles (play/pause/seek/volume/fullscreen/
+velocidade 0.5x–2x) e o **loop A-B** (inteiramente client-side por design — seção 10 do
+prompt-mestre, não depende do backend) — só existe quando `apps/admin` (FASE 11) e `apps/mobile`
+(FASE 10) forem de fato scaffolded. Este endpoint é exatamente o que esses futuros players vão
+consumir.
+
+Endpoint (`/api/v1/...`, Bearer):
+
+| Método | Rota                    | Observação                                                |
+| ------ | ----------------------- | --------------------------------------------------------- |
+| GET    | `/lessons/:id/playback` | `{ lessonId, provider, url, expiresAt }`; `409` sem vídeo |
+
 ### Como rodar
 
 ```bash
 cd apps/api
 cp .env.example .env          # ajuste DATABASE_URL e troque JWT_SECRET/JWT_REFRESH_SECRET
 npm install                   # (se ainda nao rodou na raiz do monorepo)
-npm run prisma:migrate:dev    # aplica as 3 migrations num banco vazio
+npm run prisma:migrate:dev    # aplica as migrations num banco vazio
 npm run prisma:seed           # popula instrumentos, papeis, usuarios de dev, plano/assinatura
                                # ACTIVE do aluno e um curso de exemplo publicado
 npm run start:dev             # sobe a API em http://localhost:3000 (Swagger em /docs)
@@ -194,15 +225,15 @@ npm run start:dev             # sobe a API em http://localhost:3000 (Swagger em 
 > **Nota de ambiente:** este projeto foi desenvolvido em uma sandbox sem PostgreSQL nem acesso de
 > rede de saída disponíveis. O que **foi** verificado de fato: `prisma validate`/`generate`,
 > `tsc --noEmit`, `nest build` (gera `dist/main.js` funcional), lint limpo, `prettier --check` limpo,
-> os 31 testes unitários (`npm test`) e um teste adicional que resolve o grafo de DI do `AppModule`
+> os 38 testes unitários (`npm test`) e um teste adicional que resolve o grafo de DI do `AppModule`
 > inteiro sem precisar de Postgres (`app.module.smoke.spec.ts`) — todos passando. Foi esse último
 > teste que revelou e permitiu corrigir um bug real de conversão de `PORT` (decisão 23 em
 > `docs/ARCHITECTURE.md`) que impediria o boot da API em qualquer ambiente real. O que **não** foi
 > possível verificar aqui: subir a API contra um Postgres real e exercitar os endpoints (auth,
-> catálogo, progresso, checkout/webhook) ponta a ponta — ao tentar, o processo trava indefinidamente
-> na conexão TCP do Prisma (a sandbox bloqueia a rede em vez de recusar a conexão, então nem timeout
-> aparece). Rode os comandos acima no seu ambiente para validar o fluxo completo antes de seguir
-> para a FASE 7.
+> catálogo, progresso, checkout/webhook, playback) ponta a ponta — ao tentar, o processo trava
+> indefinidamente na conexão TCP do Prisma (a sandbox bloqueia a rede em vez de recusar a conexão,
+> então nem timeout aparece). Rode os comandos acima no seu ambiente para validar o fluxo completo
+> antes de seguir para a FASE 8.
 
 Credenciais de desenvolvimento criadas pelo seed (senha única: `Dev@12345`):
 
@@ -218,13 +249,13 @@ Credenciais de desenvolvimento criadas pelo seed (senha única: `Dev@12345`):
 npm test
 ```
 
-31 testes unitários: `RolesGuard` (RBAC), `resolveErrorBody` (garante que erros internos não vazam
+38 testes unitários: `RolesGuard` (RBAC), `resolveErrorBody` (garante que erros internos não vazam
 detalhe em produção), `catalog-visibility.util` (regras puras de propriedade/publicação do
-catálogo, FASE 4), `AccessControlService` (regra de entitlement, FASE 5), `env.validation`
-(coerção/validação de variáveis de ambiente), `date-interval.util` e `FakePaymentGateway` (FASE 6),
-mais o smoke test de DI do `AppModule`. Testes de integração para os fluxos de auth/catálogo/
-progresso/pagamentos (contra um Postgres real) ficam para a FASE 12, conforme o roadmap do
-prompt-mestre.
+catálogo, FASE 4), `AccessControlService` (regra de entitlement e `assertEntitled`, FASE 5/7),
+`env.validation` (coerção/validação de variáveis de ambiente), `date-interval.util` e
+`FakePaymentGateway` (FASE 6), `FakeVideoProvider` (FASE 7), mais o smoke test de DI do
+`AppModule`. Testes de integração para os fluxos de auth/catálogo/progresso/pagamentos/playback
+(contra um Postgres real) ficam para a FASE 12, conforme o roadmap do prompt-mestre.
 
 ## Estrutura atual
 
@@ -244,6 +275,8 @@ src/
   payments/            PaymentGateway (interface), FakePaymentGateway, PaymentsService,
                        webhook (FASE 6)
   subscriptions/       checkout, cancelamento, GET /subscriptions/me (FASE 6)
+  video/               VideoProvider (interface), FakeVideoProvider (FASE 7)
+  playback/            GET /lessons/:id/playback (FASE 7)
   common/              guards, filters, interceptors, decorators, types, utils (paginacao, slug,
                        visibilidade do catalogo)
   mail/                MailService (abstrato) + ConsoleMailService
@@ -254,5 +287,7 @@ src/
 prisma/                schema.prisma, migrations, seed
 ```
 
-Ainda faltam (fases seguintes): `live-sessions`, `storage` (URL assinada real), `notifications`,
-`admin`, adapters reais de `PaymentGateway`/`VideoProvider`.
+Ainda faltam (fases seguintes): `live-sessions`, materiais protegidos com URL assinada de verdade
+(`LessonMaterialsService` ainda expõe só `storageKey`, sem `StorageProvider`), `notifications`,
+`admin`, `apps/mobile`/`apps/admin` (onde o player embutido de fato mora — decisão 26), adapters
+reais de `PaymentGateway`/`VideoProvider`.

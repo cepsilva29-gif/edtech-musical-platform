@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessControlService } from './access-control.service';
@@ -40,5 +41,29 @@ describe('AccessControlService', () => {
       { currentPeriodEnd: null },
       { currentPeriodEnd: { gte: expect.any(Date) } },
     ]);
+  });
+});
+
+describe('AccessControlService.assertEntitled', () => {
+  it('never queries the database when the caller already manages the resource', async () => {
+    const prisma = createPrismaMock(null);
+    const service = new AccessControlService(prisma);
+
+    await expect(service.assertEntitled('user-1', true)).resolves.toBeUndefined();
+    expect(prisma.userSubscription.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('resolves when the user is not a manager but has an active entitlement', async () => {
+    const prisma = createPrismaMock({ id: 'sub-1' });
+    const service = new AccessControlService(prisma);
+
+    await expect(service.assertEntitled('user-1', false)).resolves.toBeUndefined();
+  });
+
+  it('throws ForbiddenException when the user is not a manager and has no active entitlement', async () => {
+    const prisma = createPrismaMock(null);
+    const service = new AccessControlService(prisma);
+
+    await expect(service.assertEntitled('user-1', false)).rejects.toThrow(ForbiddenException);
   });
 });

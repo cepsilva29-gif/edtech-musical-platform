@@ -412,6 +412,68 @@ gateway_customer_id)` — mudança isolada, sem afetar `PaymentGateway`/`Subscri
   para revisar `enableImplicitConversion` com ceticismo ao adicionar novos campos numéricos/boolean
   a `EnvironmentVariables`.
 
+## 24. `AccessControlService.assertEntitled` — regra de consumo centralizada (regra dos 3)
+
+- **Decisão:** o padrão "quem gerencia o curso sempre passa; senão exige assinatura ativa" existia
+  duplicado em `LessonMaterialsService` (FASE 5) e `ProgressService` (FASE 5). Ao precisar da mesma
+  regra pela terceira vez em `PlaybackService` (FASE 7), ela foi extraída para
+  `AccessControlService.assertEntitled(userId, canManage)` — um método puro em relação ao chamador
+  (recebe `canManage` já calculado, não importa `LessonsService` nem nenhum módulo de catálogo).
+  `LessonMaterialsService`/`ProgressService` foram refatorados para usá-lo, sem mudança de
+  comportamento (mesmos testes de FASE 4/5 continuam passando).
+- **Motivo:** três ocorrências idênticas da mesma condição é o gatilho clássico para extrair —
+  antes disso, duplicar é mais barato que uma abstração errada; depois, duplicar passa a ser risco
+  real de divergência (ex. alguém corrige a mensagem de erro em um lugar e esquece os outros dois).
+- **Alternativas consideradas:** manter a duplicação também no `PlaybackService` (rejeitado — seria
+  a quarta cópia do mesmo `if`); mover a regra para `LessonsService` em vez de
+  `AccessControlService` (rejeitado — misturaria "visibilidade de catálogo" com "regra de
+  entitlement comercial", duas responsabilidades que já são módulos separados desde a FASE 5).
+- **Impacto futuro:** qualquer novo tipo de conteúdo consumível (ex. certificado de conclusão)
+  reaproveita `assertEntitled` do mesmo jeito que `PlaybackService` faz.
+
+## 25. `VideoProvider`: interface única, só `FakeVideoProvider` (dev) implementada
+
+- **Decisão:** `resolvePlaybackUrl(videoRef)` (seção 9) vira uma `abstract class VideoProvider`, no
+  mesmo espírito de `MailService`/`PaymentGateway` (decisões 11 e 20). A única implementação nesta
+  fase é `FakeVideoProvider`: nunca chama rede, gera uma URL HLS fictícia assinada por HMAC com
+  expiração curta (`VIDEO_PLAYBACK_URL_TTL_SECONDS`, padrão 600s) e loga a ação
+  (`[DEV VIDEO] ...`). Selecionada via `VIDEO_PROVIDER` (default `"fake"`); qualquer outro valor
+  falha no boot com mensagem clara (`VideoProviderModule`).
+- **Motivo:** Mux/AWS IVS/YouTube Live exigem credenciais reais que não existem nesta sandbox —
+  implementar um adapter real seria código morto e não testável, mesmo raciocínio já usado para
+  `MailService` (decisão 11) e `PaymentGateway` (decisão 20). A interface, porém, é o requisito real
+  da seção 9 e não depende de credencial nenhuma para existir.
+- **Alternativas consideradas:** resolver a URL de playback diretamente no `LessonsService`
+  (rejeitado — violaria a decisão 3, acoplando o catálogo a um "provedor" fictício); expor
+  `videoRef` diretamente ao cliente sem nenhuma URL assinada (rejeitado — contraria a seção 9
+  explicitamente, e não prepara o terreno para controle de acesso de conteúdo pago).
+- **Impacto futuro:** plugar Mux/AWS IVS/YouTube Live de verdade é implementar uma nova classe que
+  satisfaz `VideoProvider` e trocar `VIDEO_PROVIDER` — `PlaybackService` não muda.
+
+## 26. Escopo da FASE 7 fica no backend: URL assinada, não o player embutido
+
+- **Decisão:** esta fase entrega `GET /lessons/:id/playback` (resolve a URL de reprodução,
+  respeitando exatamente a mesma regra de acesso de materiais/progresso — decisão 24) e a
+  abstração `VideoProvider`. **Não** entrega nenhum código de player embutido (HLS.js/Video.js no
+  admin, `expo-av`/`react-native-video` no mobile, loop A-B, controle de velocidade 0.5x–2x —
+  seção 10), porque esses componentes vivem em `apps/admin` e `apps/mobile`, que ainda não existem
+  no monorepo (roadmap: FASE 11 e FASE 10, respectivamente).
+- **Motivo:** a ordem do roadmap coloca "Player de vídeo" (FASE 7) antes de "Aplicativo mobile"
+  (FASE 10) e "Painel administrativo" (FASE 11) — só faz sentido lida como "o backend expõe tudo
+  que um player vai precisar antes de o player em si existir", análogo ao raciocínio já usado nas
+  decisões 17 e 21 para "Controle de acesso" vir antes de "Assinaturas e pagamentos". O loop A-B em
+  si é **inteiramente client-side** por design (seção 10: "não depende do backend"), então mesmo
+  quando `apps/admin`/`apps/mobile` existirem, ele não terá contraparte de API nenhuma — é lógica
+  pura de UI observando o evento de progresso do player escolhido.
+- **Alternativas consideradas:** adiar a FASE 7 inteira até `apps/admin`/`apps/mobile` existirem
+  (rejeitado — inverteria a ordem do roadmap sem necessidade real, já que a resolução de URL
+  assinada é um requisito de backend genuíno e testável isoladamente); escrever um player web
+  dentro de `apps/api` só para "ter algo visual" (rejeitado — fora do propósito de uma API REST,
+  duplicaria trabalho quando `apps/admin` for scaffolded de verdade).
+- **Impacto futuro:** quando `apps/admin`/`apps/mobile` forem criados (FASE 10/11), eles consomem
+  `GET /lessons/:id/playback` e implementam loop A-B/controles inteiramente no cliente — nenhuma
+  mudança de contrato de API é esperada para isso.
+
 ---
 
 ## Compatibilidade verificada nesta fase

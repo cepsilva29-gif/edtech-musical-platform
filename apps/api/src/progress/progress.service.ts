@@ -1,9 +1,9 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PublishStatus, StudentProgress } from '@prisma/client';
 import { AccessControlService } from '../access-control/access-control.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.interface';
 import { CoursesService } from '../courses/courses.service';
-import { LessonsService, LessonWithModule } from '../lessons/lessons.service';
+import { LessonsService } from '../lessons/lessons.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateLessonProgressDto } from './dto/update-lesson-progress.dto';
 
@@ -63,7 +63,10 @@ export class ProgressService {
     dto: UpdateLessonProgressDto,
   ): Promise<LessonProgressView> {
     const lesson = await this.lessonsService.findOne(user, lessonId);
-    await this.assertCanConsume(user, lesson);
+    await this.accessControlService.assertEntitled(
+      user.id,
+      this.lessonsService.canManage(user, lesson),
+    );
 
     const existing = await this.findExisting(user.id, lessonId);
     const watchedSeconds = Math.max(existing?.watchedSeconds ?? 0, dto.watchedSeconds);
@@ -94,7 +97,10 @@ export class ProgressService {
 
   async completeLesson(user: AuthenticatedUser, lessonId: string): Promise<LessonProgressView> {
     const lesson = await this.lessonsService.findOne(user, lessonId);
-    await this.assertCanConsume(user, lesson);
+    await this.accessControlService.assertEntitled(
+      user.id,
+      this.lessonsService.canManage(user, lesson),
+    );
 
     const existing = await this.findExisting(user.id, lessonId);
     const progress = await this.prisma.studentProgress.upsert({
@@ -156,19 +162,6 @@ export class ProgressService {
       percentComplete: totalLessons === 0 ? 0 : Math.round((completedLessons / totalLessons) * 100),
       modules: moduleSummaries,
     };
-  }
-
-  private async assertCanConsume(user: AuthenticatedUser, lesson: LessonWithModule): Promise<void> {
-    if (this.lessonsService.canManage(user, lesson)) {
-      return;
-    }
-
-    const hasAccess = await this.accessControlService.hasActiveEntitlement(user.id);
-    if (!hasAccess) {
-      throw new ForbiddenException(
-        'Assinatura ativa necessaria para registrar progresso nesta aula.',
-      );
-    }
   }
 
   private findExisting(userId: string, lessonId: string): Promise<StudentProgress | null> {
