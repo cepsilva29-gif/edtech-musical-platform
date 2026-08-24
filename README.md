@@ -38,7 +38,7 @@ há nenhum arquivo "fictício" além dessas explicações.
   v24.19.0, compatível nesta fase)
 - npm `>=10`
 
-## Como executar (estado atual — FASE 5)
+## Como executar (estado atual — FASE 6)
 
 ```bash
 npm install
@@ -46,8 +46,9 @@ npm run lint
 npm run format:check
 ```
 
-API (banco de dados + backend/autenticação + catálogo + controle de acesso/progresso) — ver
-`apps/api/README.md` para o passo a passo completo, endpoints e limitações verificadas:
+API (banco de dados + backend/autenticação + catálogo + controle de acesso/progresso +
+assinaturas/pagamentos) — ver `apps/api/README.md` para o passo a passo completo, endpoints e
+limitações verificadas:
 
 ```bash
 cd apps/api
@@ -65,9 +66,9 @@ npm run start:dev             # http://localhost:3000 (Swagger em /docs)
 | 2    | Banco de dados e Prisma        | ✅ concluída                |
 | 3    | Backend e autenticação         | ✅ concluída                |
 | 4    | Cursos, módulos e aulas        | ✅ concluída                |
-| 5    | Controle de acesso e progresso | ✅ concluída (esta entrega) |
-| 6    | Assinaturas e pagamentos       | aguardando autorização      |
-| 7    | Player de vídeo                | —                           |
+| 5    | Controle de acesso e progresso | ✅ concluída                |
+| 6    | Assinaturas e pagamentos       | ✅ concluída (esta entrega) |
+| 7    | Player de vídeo                | aguardando autorização      |
 | 8    | Metrônomo e afinador           | —                           |
 | 9    | Lives                          | —                           |
 | 10   | Aplicativo mobile              | —                           |

@@ -333,6 +333,85 @@ Cada decisão é registrada como: **decisão → motivo → alternativas conside
   periodicamente com `watchedSeconds`/`lastPositionSeconds` — toda a lógica de conclusão já está no
   backend, nada muda no contrato.
 
+## 20. `PaymentGateway`: interface única, só `FakePaymentGateway` (dev) implementada
+
+- **Decisão:** `createCustomer`/`createSubscription`/`cancelSubscription`/`verifySignature`/
+  `mapWebhookEvent` (seção 7) viram uma `abstract class PaymentGateway`, no mesmo espírito de
+  `MailService` (decisão 11). A única implementação nesta fase é `FakePaymentGateway`: nunca chama
+  rede, aprova toda assinatura instantaneamente e loga a ação (`[DEV PAYMENTS] ...`). Selecionada
+  via `PAYMENT_PROVIDER` (default `"fake"`); qualquer outro valor falha no boot com mensagem clara
+  (`PaymentsModule`).
+- **Motivo:** Stripe/Asaas/Pagar.me exigem credenciais e SDKs reais que não existem nesta sandbox —
+  implementar um adapter real seria código morto e não testável (mesmo raciocínio da decisão 11
+  para `MailService`). A interface, porém, é o requisito real da seção 7 e não depende de
+  credencial nenhuma para existir.
+- **Alternativas consideradas:** implementar diretamente o SDK da Stripe já assumindo credenciais
+  futuras (rejeitado — regra 39, overengineering sem verificação possível); não ter abstração nenhuma
+  e simular tudo direto no `SubscriptionsService` (rejeitado — violaria a decisão 3, acoplando
+  regra de negócio a um "provedor" fictício que não pode ser trocado depois sem reescrever
+  consumidores).
+- **Impacto futuro:** plugar Stripe/Asaas/Pagar.me de verdade é implementar uma nova classe que
+  satisfaz `PaymentGateway` e trocar `PAYMENT_PROVIDER` — `SubscriptionsService`/`PaymentsService`
+  não mudam. O método opcional `drainSimulatedEvents()` só existe em gateways de simulação; um
+  adapter real simplesmente não o implementa (webhooks chegam via HTTP de verdade).
+
+## 21. Webhook é o único escritor de estado de assinatura, mesmo para o gateway fake
+
+- **Decisão:** `PaymentsService.processWebhookEvent()` é o único método que grava
+  `user_subscriptions.status`/`payment_invoices` — inclusive para o `FakePaymentGateway`. Em vez de
+  o checkout/cancelamento escreverem o estado diretamente, `FakePaymentGateway` enfileira os
+  eventos que um gateway real enviaria depois de forma assíncrona; `SubscriptionsService` drena essa
+  fila (`drainSimulatedEvents()`) logo após chamar `createSubscription`/`cancelSubscription` e
+  alimenta cada evento no mesmo `processWebhookEvent()` que a rota pública
+  `POST /payments/webhook/:gateway` usaria. Idempotência por `@@unique([gateway, eventId])` (constraint
+  de banco, não `if` de aplicação) — uma tentativa duplicada apenas encontra o registro já existente.
+- **Motivo:** regra explícita da seção 7 ("o estado real de uma assinatura só muda por confirmação
+  de backend/webhook — nunca por sinal do frontend"). Se o checkout escrevesse `status: ACTIVE`
+  diretamente após chamar o gateway fake, o código de desenvolvimento praticaria exatamente o
+  padrão proibido, e um dev copiando esse caminho para um gateway real herdaria o bug.
+- **Alternativas consideradas:** checkout escreve o status otimisticamente e o webhook só confirma
+  depois (rejeitado — é literalmente a regra que a seção 7 proíbe); gateway fake chamando a própria
+  rota HTTP `POST /payments/webhook/fake` via loopback (rejeitado — round-trip de rede
+  desnecessário dentro do mesmo processo, sem benefício sobre chamar o service diretamente).
+- **Impacto futuro:** nenhum consumidor de `AccessControlService`/`ProgressService` (FASE 5) muda —
+  eles já liam `user_subscriptions` sem saber como ela é escrita (decisão 17).
+
+## 22. `users.gateway_customer_id` (nova migration) — não previsto na FASE 2
+
+- **Necessidade:** `createCustomer` (seção 7) precisa de um lugar para persistir o id do cliente no
+  gateway, para reaproveitar entre assinaturas futuras do mesmo usuário e evitar criar um cliente
+  duplicado a cada checkout. O schema da FASE 2 não previu essa coluna porque a estratégia de
+  pagamentos ainda não tinha sido implementada.
+- **Alteração:** `User.gatewayCustomerId String? @unique` — uma única coluna, não uma tabela à
+  parte, porque `PAYMENT_PROVIDER` já é um único provedor ativo por ambiente (decisão 3); não há
+  hoje um caso de um mesmo usuário ter clientes simultâneos em gateways diferentes.
+- **Migration:** `prisma/migrations/20260824180000_gateway_customer_id/`.
+- **Impacto futuro:** se o produto um dia precisar suportar múltiplos gateways simultâneos (ex.
+  migração gradual de provedor), essa coluna vira uma tabela `gateway_customers(user_id, gateway,
+gateway_customer_id)` — mudança isolada, sem afetar `PaymentGateway`/`SubscriptionsService`.
+
+## 23. Correção: `PORT` do `.env` nunca era convertido de string para número
+
+- **Decisão:** `env.validation.ts` (FASE 3) usava `enableImplicitConversion: true` do
+  `class-transformer` sem `@Type(() => Number)` explícito no campo `PORT`. Um teste novo desta fase
+  (`app.module.smoke.spec.ts`, que resolve o grafo de DI inteiro do `AppModule` sem precisar de
+  Postgres) expôs que essa conversão implícita **não** acontecia de fato: `PORT` chegava como a
+  string `"3000"` vinda do `.env`/ambiente, e `@IsInt()` rejeitava, derrubando o boot da API com
+  "Configuração de ambiente inválida" — em qualquer ambiente real, não só nesta sandbox. Corrigido
+  adicionando `@Type(() => Number)` (a forma robusta e documentada do `class-transformer`, que não
+  depende de metadata de tipo refletida corretamente). Teste de regressão em `env.validation.spec.ts`.
+  Como nenhum outro campo do `env.validation.ts` é numérico, nenhum outro campo tinha esse risco.
+- **Motivo:** este bug nunca foi pego nas fases 3-5 porque a sandbox não tem Postgres, então
+  `npm run start:dev` nunca foi executado de fato aqui — só `nest build`/`tsc --noEmit` (que não
+  executam `validate()`) e testes unitários que não montavam o `AppModule` inteiro. Reforça o valor
+  de um teste de "compilação do grafo de DI" mesmo sem banco disponível.
+- **Alternativas consideradas:** confiar de novo em `enableImplicitConversion` (rejeitado — é
+  exatamente o que já tinha falhado silenciosamente); remover a validação de tipo de `PORT`
+  (rejeitado — perderia a proteção contra um valor de porta inválido em produção).
+- **Impacto futuro:** nenhum — é uma correção de bug, não uma mudança de contrato. Serve de lembrete
+  para revisar `enableImplicitConversion` com ceticismo ao adicionar novos campos numéricos/boolean
+  a `EnvironmentVariables`.
+
 ---
 
 ## Compatibilidade verificada nesta fase

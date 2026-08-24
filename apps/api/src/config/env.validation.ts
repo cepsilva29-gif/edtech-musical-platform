@@ -1,4 +1,4 @@
-import { plainToInstance } from 'class-transformer';
+import { plainToInstance, Type } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsString, Max, Min, validateSync } from 'class-validator';
 
 enum Environment {
@@ -13,6 +13,7 @@ class EnvironmentVariables {
   @IsOptional()
   NODE_ENV: Environment = Environment.Development;
 
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(65535)
@@ -39,6 +40,14 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   CORS_ORIGIN = '*';
+
+  @IsString()
+  @IsOptional()
+  PAYMENT_PROVIDER = 'fake';
+
+  @IsString()
+  @IsOptional()
+  FAKE_PAYMENT_GATEWAY_SECRET = 'dev-fake-gateway-secret';
 }
 
 export function validate(config: Record<string, unknown>): EnvironmentVariables {

@@ -17,8 +17,11 @@ import { InstrumentsModule } from './instruments/instruments.module';
 import { LessonMaterialsModule } from './lesson-materials/lesson-materials.module';
 import { LessonsModule } from './lessons/lessons.module';
 import { MailModule } from './mail/mail.module';
+import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProgressModule } from './progress/progress.module';
+import { SubscriptionPlansModule } from './subscription-plans/subscription-plans.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -50,6 +53,9 @@ import { UsersModule } from './users/users.module';
     LessonMaterialsModule,
     AccessControlModule,
     ProgressModule,
+    SubscriptionPlansModule,
+    PaymentsModule,
+    SubscriptionsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

@@ -3,8 +3,8 @@
 Backend NestJS + TypeScript (API REST versionada `/api/v1`).
 
 **Status:** banco de dados (FASE 2), backend + autenticação (FASE 3), catálogo — instrumentos,
-cursos, módulos e aulas (FASE 4) e controle de acesso + progresso (FASE 5) implementados.
-Assinaturas/pagamentos, lives e player chegam nas fases seguintes.
+cursos, módulos e aulas (FASE 4), controle de acesso + progresso (FASE 5) e assinaturas/pagamentos
+(FASE 6) implementados. Lives, player e metrônomo/afinador chegam nas fases seguintes.
 
 ## Banco de dados (Prisma) — FASE 2
 
@@ -14,8 +14,10 @@ Assinaturas/pagamentos, lives e player chegam nas fases seguintes.
 - `prisma/migrations/20260824170000_auth_tokens/` — migration 2 (FASE 3): tabela
   `verification_tokens` + índice único em `refresh_tokens.token_hash` (ver
   `docs/ARCHITECTURE.md`, decisão 12).
-- `prisma/seed.ts` — popula os 3 instrumentos, os papéis (student/teacher/admin) e 3 usuários de
-  **desenvolvimento**.
+- `prisma/migrations/20260824180000_gateway_customer_id/` — migration 3 (FASE 6): coluna
+  `users.gateway_customer_id` (ver `docs/ARCHITECTURE.md`, decisão 22).
+- `prisma/seed.ts` — popula os 3 instrumentos, os papéis (student/teacher/admin), 3 usuários de
+  **desenvolvimento**, um plano + assinatura `ACTIVE` de teste e um curso de exemplo publicado.
 
 Prisma está fixado em `6.12.0` — motivo em `docs/ARCHITECTURE.md`, decisão 7.
 
@@ -128,13 +130,62 @@ Endpoints (`/api/v1/...`, todos com Bearer):
 | POST   | `/lessons/:lessonId/progress/complete` | marca a aula como concluída manualmente             |
 | GET    | `/courses/:courseId/progress`          | resumo agregado (por módulo/aula) do curso          |
 
+## Assinaturas e pagamentos — FASE 6
+
+Módulos implementados: **subscription-plans**, **payments**, **subscriptions**.
+
+- **`subscription-plans`** — CRUD de planos (`name`, `priceCents`, `currency`, `interval`
+  `month`/`year`, `trialDays`, `status`), no mesmo padrão de `instruments` (admin escreve; demais
+  papéis só veem `PUBLISHED`).
+- **`payments`** — `PaymentGateway` (interface abstrata: `createCustomer`, `createSubscription`,
+  `cancelSubscription`, `verifySignature`, `mapWebhookEvent` — decisão 20) e
+  `PaymentsService.processWebhookEvent()`, o único ponto que escreve
+  `user_subscriptions.status`/`payment_invoices` — nunca o checkout diretamente (decisão 21).
+  Idempotência por constraint única `(gateway, eventId)` em `payment_webhook_events`.
+- **`subscriptions`** — `POST /subscriptions/checkout` (cria/reaproveita cliente no gateway, cria a
+  assinatura local como `INCOMPLETE` e drena os eventos que o gateway simulado "enviaria"
+  assincronamente), `POST /subscriptions/cancel`, `GET /subscriptions/me`.
+
+**Somente `PAYMENT_PROVIDER=fake` está implementado nesta fase** (`FakePaymentGateway`, no mesmo
+espírito de `ConsoleMailService` — decisão 11): não chama nenhuma API externa, aprova toda
+assinatura instantaneamente e loga a ação (`[DEV PAYMENTS] ...`). Ele nunca escreve estado
+diretamente — enfileira eventos normalizados e os processa através do mesmo
+`PaymentsService.processWebhookEvent()` que a rota pública de webhook usaria com um gateway real,
+preservando a regra da seção 7 do prompt-mestre ("o estado real de uma assinatura só muda por
+webhook, nunca por resposta do frontend") mesmo em desenvolvimento. Um provedor real (Stripe/
+Asaas/Pagar.me) entra depois implementando a mesma interface, sem mudar `SubscriptionsService`/
+`PaymentsService`.
+
+Endpoints (`/api/v1/...`):
+
+| Método | Rota                         | Auth                                     |
+| ------ | ---------------------------- | ---------------------------------------- |
+| GET    | `/subscription-plans`        | Bearer (admin filtra por status)         |
+| GET    | `/subscription-plans/:id`    | Bearer                                   |
+| POST   | `/subscription-plans`        | admin                                    |
+| PATCH  | `/subscription-plans/:id`    | admin                                    |
+| DELETE | `/subscription-plans/:id`    | admin                                    |
+| POST   | `/subscriptions/checkout`    | Bearer — `{ planId }`                    |
+| POST   | `/subscriptions/cancel`      | Bearer                                   |
+| GET    | `/subscriptions/me`          | Bearer                                   |
+| POST   | `/payments/webhook/:gateway` | público (assinatura verificada no corpo) |
+| GET    | `/payments/invoices/me`      | Bearer                                   |
+
+> **Limitação conhecida:** `POST /payments/webhook/:gateway` recebe o corpo já parseado pelo
+> `ValidationPipe`/body parser padrão do Nest e o reserializa (`JSON.stringify`) antes de verificar
+> a assinatura. Isso é suficiente para o `FakePaymentGateway` (que nunca passa por essa rota — ele
+> alimenta `processWebhookEvent` diretamente em processo) mas **não** é suficiente para um gateway
+> real baseado em HMAC sobre o corpo bruto (ex. Stripe): a re-serialização não é byte-a-byte igual
+> ao corpo original. Antes de plugar um gateway real, esta rota precisa de captura de raw body
+> (`bodyParser: false` + middleware dedicado nesta rota, conforme a documentação do NestJS).
+
 ### Como rodar
 
 ```bash
 cd apps/api
 cp .env.example .env          # ajuste DATABASE_URL e troque JWT_SECRET/JWT_REFRESH_SECRET
 npm install                   # (se ainda nao rodou na raiz do monorepo)
-npm run prisma:migrate:dev    # aplica as 2 migrations num banco vazio
+npm run prisma:migrate:dev    # aplica as 3 migrations num banco vazio
 npm run prisma:seed           # popula instrumentos, papeis, usuarios de dev, plano/assinatura
                                # ACTIVE do aluno e um curso de exemplo publicado
 npm run start:dev             # sobe a API em http://localhost:3000 (Swagger em /docs)
@@ -142,12 +193,16 @@ npm run start:dev             # sobe a API em http://localhost:3000 (Swagger em 
 
 > **Nota de ambiente:** este projeto foi desenvolvido em uma sandbox sem PostgreSQL nem acesso de
 > rede de saída disponíveis. O que **foi** verificado de fato: `prisma validate`/`generate`,
-> `tsc --noEmit`, `nest build` (gera `dist/main.js` funcional), lint limpo, `prettier --check` limpo
-> e os 18 testes unitários (`npm test`) — todos passando. O que **não** foi possível verificar aqui:
-> subir a API contra um Postgres real e exercitar os endpoints (auth, catálogo e progresso) ponta a
-> ponta — ao tentar, o processo trava indefinidamente na conexão TCP do Prisma (a sandbox bloqueia a rede em
-> vez de recusar a conexão, então nem timeout aparece). Rode os comandos acima no seu ambiente para
-> validar o fluxo completo antes de seguir para a FASE 6.
+> `tsc --noEmit`, `nest build` (gera `dist/main.js` funcional), lint limpo, `prettier --check` limpo,
+> os 31 testes unitários (`npm test`) e um teste adicional que resolve o grafo de DI do `AppModule`
+> inteiro sem precisar de Postgres (`app.module.smoke.spec.ts`) — todos passando. Foi esse último
+> teste que revelou e permitiu corrigir um bug real de conversão de `PORT` (decisão 23 em
+> `docs/ARCHITECTURE.md`) que impediria o boot da API em qualquer ambiente real. O que **não** foi
+> possível verificar aqui: subir a API contra um Postgres real e exercitar os endpoints (auth,
+> catálogo, progresso, checkout/webhook) ponta a ponta — ao tentar, o processo trava indefinidamente
+> na conexão TCP do Prisma (a sandbox bloqueia a rede em vez de recusar a conexão, então nem timeout
+> aparece). Rode os comandos acima no seu ambiente para validar o fluxo completo antes de seguir
+> para a FASE 7.
 
 Credenciais de desenvolvimento criadas pelo seed (senha única: `Dev@12345`):
 
@@ -163,35 +218,41 @@ Credenciais de desenvolvimento criadas pelo seed (senha única: `Dev@12345`):
 npm test
 ```
 
-18 testes unitários: `RolesGuard` (RBAC), `resolveErrorBody` (garante que erros internos não vazam
+31 testes unitários: `RolesGuard` (RBAC), `resolveErrorBody` (garante que erros internos não vazam
 detalhe em produção), `catalog-visibility.util` (regras puras de propriedade/publicação do
-catálogo, FASE 4) e `AccessControlService` (regra de entitlement, FASE 5). Testes de integração
-para os fluxos de auth/catálogo/progresso (contra um Postgres real) ficam para a FASE 12, conforme
-o roadmap do prompt-mestre.
+catálogo, FASE 4), `AccessControlService` (regra de entitlement, FASE 5), `env.validation`
+(coerção/validação de variáveis de ambiente), `date-interval.util` e `FakePaymentGateway` (FASE 6),
+mais o smoke test de DI do `AppModule`. Testes de integração para os fluxos de auth/catálogo/
+progresso/pagamentos (contra um Postgres real) ficam para a FASE 12, conforme o roadmap do
+prompt-mestre.
 
 ## Estrutura atual
 
 ```
 src/
   app.module.ts / main.ts
-  auth/              controller, service, token service, strategies, dto
-  users/             controller, service
-  instruments/       CRUD de instrumentos (FASE 4)
-  courses/           CRUD de cursos (FASE 4)
-  course-modules/    CRUD de modulos de curso (entidade Module) (FASE 4)
-  lessons/           CRUD de aulas (FASE 4)
-  lesson-materials/  CRUD de materiais de aula (FASE 4, gate de assinatura na FASE 5)
-  access-control/    AccessControlService (entitlement) + GET /access/me (FASE 5)
-  progress/          progresso do aluno por aula/curso (FASE 5)
-  common/            guards, filters, interceptors, decorators, types, utils (paginacao, slug,
-                     visibilidade do catalogo)
-  mail/              MailService (abstrato) + ConsoleMailService
-  audit/             AuditService (audit_logs)
-  health/            GET /health, GET /ready
-  config/            validacao de env
-  prisma/            PrismaService/PrismaModule (global)
-prisma/              schema.prisma, migrations, seed
+  auth/                controller, service, token service, strategies, dto
+  users/               controller, service
+  instruments/         CRUD de instrumentos (FASE 4)
+  courses/             CRUD de cursos (FASE 4)
+  course-modules/      CRUD de modulos de curso (entidade Module) (FASE 4)
+  lessons/             CRUD de aulas (FASE 4)
+  lesson-materials/    CRUD de materiais de aula (FASE 4, gate de assinatura na FASE 5)
+  access-control/      AccessControlService (entitlement) + GET /access/me (FASE 5)
+  progress/            progresso do aluno por aula/curso (FASE 5)
+  subscription-plans/  CRUD de planos de assinatura (FASE 6)
+  payments/            PaymentGateway (interface), FakePaymentGateway, PaymentsService,
+                       webhook (FASE 6)
+  subscriptions/       checkout, cancelamento, GET /subscriptions/me (FASE 6)
+  common/              guards, filters, interceptors, decorators, types, utils (paginacao, slug,
+                       visibilidade do catalogo)
+  mail/                MailService (abstrato) + ConsoleMailService
+  audit/               AuditService (audit_logs)
+  health/              GET /health, GET /ready
+  config/              validacao de env
+  prisma/              PrismaService/PrismaModule (global)
+prisma/                schema.prisma, migrations, seed
 ```
 
-Ainda faltam (fases seguintes): `live-sessions`, `subscriptions` (checkout/gateway real),
-`payments`, `storage` (URL assinada real), `notifications`, `admin`.
+Ainda faltam (fases seguintes): `live-sessions`, `storage` (URL assinada real), `notifications`,
+`admin`, adapters reais de `PaymentGateway`/`VideoProvider`.
