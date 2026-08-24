@@ -9,7 +9,12 @@ import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { validate } from './config/env.validation';
+import { CourseModulesModule } from './course-modules/course-modules.module';
+import { CoursesModule } from './courses/courses.module';
 import { HealthModule } from './health/health.module';
+import { InstrumentsModule } from './instruments/instruments.module';
+import { LessonMaterialsModule } from './lesson-materials/lesson-materials.module';
+import { LessonsModule } from './lessons/lessons.module';
 import { MailModule } from './mail/mail.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
@@ -36,6 +41,11 @@ import { UsersModule } from './users/users.module';
     MailModule,
     UsersModule,
     AuthModule,
+    InstrumentsModule,
+    CoursesModule,
+    CourseModulesModule,
+    LessonsModule,
+    LessonMaterialsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

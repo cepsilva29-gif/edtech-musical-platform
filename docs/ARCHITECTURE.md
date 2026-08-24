@@ -199,6 +199,80 @@ Cada decisão é registrada como: **decisão → motivo → alternativas conside
   global (`resolveErrorBody`) — ambos testáveis sem banco. Fluxos que dependem de Prisma (register/
   login/refresh) ainda não têm teste automatizado; ver limitação de ambiente abaixo.
 
+## 13. Catálogo (FASE 4) exige autenticação — sem vitrine pública anônima
+
+- **Decisão:** todos os endpoints de `instruments`/`courses`/`course-modules`/`lessons`/
+  `lesson-materials`, inclusive os de leitura, ficam atrás do `JwtAuthGuard` global — nenhum é
+  marcado `@Public()`. Qualquer usuário autenticado (aluno, professor ou admin) pode listar/ver
+  conteúdo publicado; a visibilidade de rascunho/arquivado é só para o dono ou admin (decisão 14).
+- **Motivo:** o prompt-mestre não pede uma página de marketing pré-login nesta fase (a FASE 4 cobre
+  "cursos, módulos e aulas", não um site institucional); manter tudo atrás de autenticação evita
+  criar dois modos de resposta (anônimo vs. autenticado) para o mesmo endpoint, o que exigiria um
+  guard de autenticação opcional só para diferenciar "aluno" de "visitante anônimo" — complexidade
+  sem requisito concreto ainda (regra 39 — evitar overengineering).
+- **Alternativas consideradas:** guard de autenticação opcional (decodifica o JWT se presente, mas
+  não exige) para permitir navegação anônima do catálogo público (rejeitado por ora — nenhum
+  requisito de vitrine pública foi definido; adicionar esse guard depois é uma mudança isolada, sem
+  afetar as regras de visibilidade já implementadas).
+- **Impacto futuro:** se uma landing/vitrine pública for exigida (ex. para SEO/conversão antes do
+  cadastro), basta introduzir esse guard opcional e trocar `@Roles()`/ausência de `@Public()` pelos
+  endpoints de leitura — a lógica de negócio (`catalog-visibility.util.ts`) não muda, pois já separa
+  "pode gerenciar" de "está publicado".
+
+## 14. Visibilidade e propriedade do catálogo centralizadas em um util puro
+
+- **Decisão:** as regras "quem pode gerenciar" (`canManageCourse` — admin ou o professor dono) e
+  "o que está visível para quem não gerencia" (`isCoursePublished`/`isModulePublished`/
+  `isLessonPublished` — toda a cadeia Instrumento→Curso→Módulo→Aula precisa estar `PUBLISHED`) vivem
+  em `common/utils/catalog-visibility.util.ts`, como funções puras sem dependência do Nest/Prisma
+  runtime, e são reusadas por `InstrumentsService`, `CoursesService`, `CourseModulesService`,
+  `LessonsService` e `LessonMaterialsService`.
+- **Motivo:** a hierarquia de 4 níveis repetiria a mesma condição ("published E pai published") em
+  cada serviço se não fosse centralizada — risco real de um nível divergir dos outros e vazar
+  rascunho de outro professor. Funções puras também são testáveis sem mocks de Prisma/Nest (ver
+  `catalog-visibility.util.spec.ts`).
+- **Alternativas consideradas:** repetir a checagem em cada service (rejeitado — duplicação com alto
+  risco de divergência); um `CaslAbility`/guard de policy genérico (rejeitado — overengineering para
+  4 recursos com uma única regra de propriedade; reavaliar se o número de regras crescer nas fases
+  de assinatura/pagamento).
+- **Impacto futuro:** qualquer novo recurso da hierarquia (ex. quizzes por aula) só precisa de uma
+  nova função `isXPublished` seguindo o mesmo padrão encadeado.
+
+## 15. Não é permitido excluir conteúdo `PUBLISHED` — só arquivar
+
+- **Decisão:** `DELETE` em curso/módulo/aula retorna `409 Conflict` se o registro estiver
+  `PUBLISHED`; é preciso primeiro fazer `PATCH` para `ARCHIVED` (ou `DRAFT`) e só então excluir.
+  Instrumento segue regra parecida, mas por contagem de cursos vinculados (FK `Restrict`).
+- **Motivo:** `Course→Module→Lesson→LessonMaterial` usa `onDelete: Cascade` no schema (FASE 2) — uma
+  exclusão de curso publicado apagaria em cascata módulos/aulas/materiais e (mais tarde, FASE 5)
+  progresso de alunos, sem nenhuma confirmação. Como a API não tem um mecanismo de "confirmar
+  exclusão em cascata", a forma mais simples e segura de evitar perda de dado acidental é proibir a
+  exclusão direta de algo publicado.
+- **Alternativas consideradas:** permitir exclusão direta de qualquer status (rejeitado — risco de
+  apagar conteúdo em uso por alunos sem aviso); soft delete (`deletedAt`) em vez de excluir de fato
+  (rejeitado por ora — nenhuma outra tabela do schema usa soft delete; introduzir o padrão só para
+  este caso seria inconsistente com a FASE 2 já implementada).
+- **Impacto futuro:** quando `student_progress` passar a ser populado de verdade (FASE 5), esta regra
+  já garante que um curso com alunos ativos não pode ser excluído sem primeiro ser arquivado
+  deliberadamente por quem o gerencia.
+
+## 16. Rotas aninhadas "achatadas": coleção aninhada, item no topo
+
+- **Decisão:** listagem/criação usam o caminho aninhado do pai (`GET/POST /courses/:courseId/modules`,
+  `GET/POST /modules/:moduleId/lessons`, `GET/POST /lessons/:lessonId/materials`), mas
+  leitura/edição/exclusão de um item específico usam um caminho de topo com o próprio id
+  (`GET/PATCH/DELETE /course-modules/:id`, `/lessons/:id`, `/lesson-materials/:id`) — sem repetir a
+  cadeia inteira de ids pai na URL.
+- **Motivo:** UUID já identifica o recurso de forma única; obrigar o cliente a conhecer/enviar
+  `courseId` e `moduleId` só para editar uma aula específica (`/courses/:c/modules/:m/lessons/:l`)
+  não agrega informação e deixa admin/mobile/app com mais estado para montar a URL.
+- **Alternativas consideradas:** aninhamento completo em todos os métodos (rejeitado — verboso sem
+  ganho); recursos 100% no nível raiz mesmo para listar (`GET /lessons?moduleId=`) (rejeitado — menos
+  explícito que a coleção pertence ao pai, e foge do padrão REST aninhado já natural para
+  Instrumento→Curso→Módulo→Aula).
+- **Impacto futuro:** nenhum — é só uma convenção de rota; a lógica de propriedade/visibilidade não
+  depende de quantos ids aparecem na URL.
+
 ---
 
 ## Compatibilidade verificada nesta fase

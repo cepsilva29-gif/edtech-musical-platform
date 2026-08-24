@@ -2,8 +2,9 @@
 
 Backend NestJS + TypeScript (API REST versionada `/api/v1`).
 
-**Status:** banco de dados (FASE 2) e backend + autenticação (FASE 3) implementados. Módulos de
-catálogo/progresso/assinaturas/pagamentos/lives chegam nas fases seguintes.
+**Status:** banco de dados (FASE 2), backend + autenticação (FASE 3) e catálogo — instrumentos,
+cursos, módulos e aulas (FASE 4) implementados. Progresso/controle de acesso, assinaturas,
+pagamentos e lives chegam nas fases seguintes.
 
 ## Banco de dados (Prisma) — FASE 2
 
@@ -55,6 +56,47 @@ Rate limiting (`@nestjs/throttler`, em memória — decisão 9): 100 req/min glo
 endpoints de auth mais sensíveis (`register`, `login`, `forgot-password`). Documentação interativa
 em `GET /docs` (Swagger, **desabilitado quando `NODE_ENV=production`**).
 
+## Catálogo — instrumentos, cursos, módulos e aulas — FASE 4
+
+Módulos implementados: **instruments**, **courses**, **course-modules** (entidade `Module` do
+schema — módulo de curso, não módulo NestJS), **lessons**, **lesson-materials**.
+
+Todos os endpoints exigem Bearer token (nenhum é público — decisão 13 de `docs/ARCHITECTURE.md`).
+Visibilidade e propriedade seguem uma única regra, aplicada em cascata pela hierarquia
+Instrumento→Curso→Módulo→Aula→Material (decisão 14):
+
+- **admin** vê e gerencia tudo, em qualquer status.
+- **teacher** vê/gerencia os próprios cursos (e módulos/aulas/materiais deles) em qualquer status;
+  vê o conteúdo de outros professores apenas quando `PUBLISHED` em toda a cadeia (curso, instrumento,
+  módulo e aula publicados).
+- **student** (ou qualquer outro papel) só vê a cadeia inteira `PUBLISHED`.
+
+Escrita (`POST`/`PATCH`/`DELETE`) exige papel `admin` (instrumentos) ou `admin`/`teacher` dono do
+curso (cursos/módulos/aulas/materiais). `DELETE` de curso/módulo/aula publicado retorna `409` — é
+preciso arquivar (`status: ARCHIVED`) antes de excluir (decisão 15). Vídeo (`videoProvider`/
+`videoRef`) e materiais (`storageKey`) armazenam apenas referências nesta fase — resolução de URL
+assinada/playback fica para as fases de storage (FASE 5+) e player (FASE 7).
+
+Endpoints (`/api/v1/...`, todos com Bearer):
+
+| Método           | Rota                           | Escrita restrita a       |
+| ---------------- | ------------------------------ | ------------------------ |
+| GET/POST         | `/instruments`                 | POST: admin              |
+| GET/PATCH/DELETE | `/instruments/:id`             | admin                    |
+| GET              | `/instruments/slug/:slug`      | —                        |
+| GET/POST         | `/courses`                     | POST: admin/teacher      |
+| GET/PATCH/DELETE | `/courses/:id`                 | admin/teacher dono       |
+| GET              | `/courses/slug/:slug`          | —                        |
+| GET/POST         | `/courses/:courseId/modules`   | POST: admin/teacher dono |
+| GET/PATCH/DELETE | `/course-modules/:id`          | admin/teacher dono       |
+| GET/POST         | `/modules/:moduleId/lessons`   | POST: admin/teacher dono |
+| GET/PATCH/DELETE | `/lessons/:id`                 | admin/teacher dono       |
+| GET/POST         | `/lessons/:lessonId/materials` | POST: admin/teacher dono |
+| GET/PATCH/DELETE | `/lesson-materials/:id`        | admin/teacher dono       |
+
+Listagens aceitam paginação (`page`, `limit`, padrão 20, máx. 100) e filtros por status/nível/busca
+conforme o recurso — ver `GET /docs` (Swagger) para o contrato completo de cada DTO.
+
 ### Como rodar
 
 ```bash
@@ -68,12 +110,12 @@ npm run start:dev             # sobe a API em http://localhost:3000 (Swagger em 
 
 > **Nota de ambiente:** este projeto foi desenvolvido em uma sandbox sem PostgreSQL nem acesso de
 > rede de saída disponíveis. O que **foi** verificado de fato: `prisma validate`/`generate`,
-> `tsc --noEmit`, `nest build` (gera `dist/main.js` funcional), lint limpo e os 8 testes unitários
-> (`npm test`) — todos passando. O que **não** foi possível verificar aqui: subir a API contra um
-> Postgres real e exercitar os endpoints (`register`/`login`/`refresh`/etc.) ponta a ponta — ao
+> `tsc --noEmit`, `nest build` (gera `dist/main.js` funcional), lint limpo, `prettier --check` limpo
+> e os 15 testes unitários (`npm test`) — todos passando. O que **não** foi possível verificar aqui:
+> subir a API contra um Postgres real e exercitar os endpoints (auth e catálogo) ponta a ponta — ao
 > tentar, o processo trava indefinidamente na conexão TCP do Prisma (a sandbox bloqueia a rede em
 > vez de recusar a conexão, então nem timeout aparece). Rode os comandos acima no seu ambiente para
-> validar o fluxo completo antes de seguir para a FASE 4.
+> validar o fluxo completo antes de seguir para a FASE 5.
 
 Credenciais de desenvolvimento criadas pelo seed (senha única: `Dev@12345`):
 
@@ -89,25 +131,32 @@ Credenciais de desenvolvimento criadas pelo seed (senha única: `Dev@12345`):
 npm test
 ```
 
-8 testes unitários cobrindo `RolesGuard` (RBAC) e `resolveErrorBody` (garante que erros internos
-não vazam detalhe em produção). Testes de integração para os fluxos de auth (register/login/
-refresh contra um Postgres real) ficam para a FASE 12, conforme o roadmap do prompt-mestre.
+15 testes unitários: `RolesGuard` (RBAC), `resolveErrorBody` (garante que erros internos não vazam
+detalhe em produção) e `catalog-visibility.util` (regras puras de propriedade/publicação do
+catálogo, FASE 4). Testes de integração para os fluxos de auth e catálogo (contra um Postgres real)
+ficam para a FASE 12, conforme o roadmap do prompt-mestre.
 
 ## Estrutura atual
 
 ```
 src/
   app.module.ts / main.ts
-  auth/        controller, service, token service, strategies, dto
-  users/       controller, service
-  common/      guards, filters, interceptors, decorators, types
-  mail/        MailService (abstrato) + ConsoleMailService
-  audit/       AuditService (audit_logs)
-  health/      GET /health, GET /ready
-  config/      validacao de env
-  prisma/      PrismaService/PrismaModule (global)
-prisma/        schema.prisma, migrations, seed
+  auth/              controller, service, token service, strategies, dto
+  users/             controller, service
+  instruments/       CRUD de instrumentos (FASE 4)
+  courses/           CRUD de cursos (FASE 4)
+  course-modules/    CRUD de modulos de curso (entidade Module) (FASE 4)
+  lessons/           CRUD de aulas (FASE 4)
+  lesson-materials/  CRUD de materiais de aula (FASE 4)
+  common/            guards, filters, interceptors, decorators, types, utils (paginacao, slug,
+                     visibilidade do catalogo)
+  mail/              MailService (abstrato) + ConsoleMailService
+  audit/             AuditService (audit_logs)
+  health/            GET /health, GET /ready
+  config/            validacao de env
+  prisma/            PrismaService/PrismaModule (global)
+prisma/              schema.prisma, migrations, seed
 ```
 
-Ainda faltam (fases seguintes): `instruments`, `courses`, `lessons`, `progress`, `live-sessions`,
-`subscriptions`, `payments`, `storage`, `notifications`, `admin`.
+Ainda faltam (fases seguintes): `progress`, `live-sessions`, `subscriptions`, `payments`,
+`storage`, `notifications`, `admin`.
