@@ -122,6 +122,83 @@ Cada decisão é registrada como: **decisão → motivo → alternativas conside
   para o modelo de driver adapter do Prisma 7. Até lá, `npm audit` deve continuar limpo; se voltar
   a acusar algo nesta dependência, tratar antes de prosseguir para a próxima fase.
 
+## 8. Refresh token: JWT assinado + persistido (hash) para revogação
+
+- **Decisão:** o refresh token é um JWT (assinado com `JWT_REFRESH_SECRET`, `sub` + `jti`), mas o
+  hash SHA-256 dele também é gravado em `refresh_tokens` com `expiresAt`/`revokedAt`. No refresh,
+  a API verifica a assinatura **e** confere no banco que o token não foi revogado/expirado, depois
+  marca-o como revogado e emite um novo par (rotação: cada refresh token só serve uma vez).
+- **Motivo:** um JWT puro (stateless) não pode ser revogado antes de expirar — se vazar, continua
+  válido até o `exp`. Guardar apenas um registro em banco (sem JWT) funciona mas perde a
+  verificação de assinatura em memória. O híbrido combina os dois: verificação rápida via
+  assinatura + capacidade real de revogar (logout, logout-all, troca de senha).
+- **Alternativas consideradas:** refresh token 100% stateless (rejeitado — impossível revogar,
+  viola "controle de sessões" da seção 5 do prompt-mestre); refresh token opaco sem JWT (aceitável,
+  mas descartado por já termos `JWT_REFRESH_SECRET` nas variáveis de ambiente definidas na FASE 1 —
+  o formato híbrido aproveita essa decisão já tomada sem introduzir um terceiro esquema).
+- **Impacto futuro:** revogar todas as sessões de um usuário (troca de senha, reset, logout-all) é
+  um `updateMany` em `refresh_tokens` — não depende de blocklist externa nem de Redis.
+
+## 9. Rate limiting em memória (`@nestjs/throttler`), não Redis
+
+- **Decisão:** limite de requisições global (100/min) + limites mais estritos em endpoints
+  sensíveis (`register`, `login`, `forgot-password`: 5–10/min) via `@nestjs/throttler` com o
+  armazenamento padrão em memória do processo.
+- **Motivo:** requisito de segurança da seção 18/38 do prompt-mestre, sem violar a decisão 6
+  (Redis só quando houver necessidade real). Com uma única instância da API rodando, memória local
+  já cumpre o requisito.
+- **Alternativas consideradas:** `ThrottlerStorageRedisService` desde já (rejeitado — só importa
+  quando a API escalar horizontalmente para múltiplas instâncias, o que ainda não é o caso).
+- **Impacto futuro:** ao rodar múltiplas instâncias atrás de um load balancer (FASE 13+), trocar o
+  storage do `ThrottlerModule` para Redis é a única mudança necessária — a API de `@Throttle()` nos
+  controllers não muda.
+
+## 10. Logs estruturados + correlation id via `nestjs-pino`
+
+- **Decisão:** logger da aplicação inteira é o Pino (via `nestjs-pino`), com JSON estruturado em
+  produção e formatação legível (`pino-pretty`) em desenvolvimento; cada requisição recebe um
+  `request-id` (do header `x-request-id` ou gerado via `crypto.randomUUID()`), e dados sensíveis
+  (`Authorization`, `Cookie`) são redigidos automaticamente dos logs.
+- **Motivo:** requisito de observabilidade da seção 27 do prompt-mestre ("logs estruturados",
+  "correlation/request ID"), sem construir uma solução própria.
+- **Alternativas consideradas:** `Logger` padrão do Nest (rejeitado — não produz JSON estruturado
+  nem correlation id de forma nativa); Winston (rejeitado — Pino é mais leve e é a opção
+  recomendada oficialmente pelo Nest para alta performance de log).
+- **Impacto futuro:** em produção, o JSON do Pino já está pronto para ser coletado por qualquer
+  agregador de log (CloudWatch, Loki, Datadog etc.) sem transformação adicional.
+
+## 11. `MailService` abstraído, implementação de console em dev
+
+- **Decisão:** módulo `mail` segue o mesmo padrão da decisão 3 (`PaymentGateway`/`StorageProvider`)
+  — uma classe abstrata `MailService` injetada nos serviços de domínio, com uma implementação
+  concreta trocável. Hoje só existe `ConsoleMailService` (loga o e-mail em vez de enviar), porque
+  nenhuma variável `SMTP_*`/provedor de e-mail foi configurada ainda.
+- **Motivo:** confirmação de e-mail e recuperação de senha (seção 5 do prompt-mestre) precisam de
+  _algum_ mecanismo de envio para serem testáveis fim a fim, mas configurar um provedor real (SMTP,
+  SES, Resend...) sem credenciais reais seria código morto.
+- **Alternativas consideradas:** deixar o envio de e-mail como TODO sem nenhuma implementação
+  (rejeitado — quebraria o fluxo de registro/reset, que dependem de gerar e "entregar" um token);
+  integrar um provedor real agora (rejeitado — não há credenciais/infra de e-mail definidas ainda,
+  seria especulativo).
+- **Impacto futuro:** plugar um provedor real é trocar o `useClass` em `MailModule` por uma nova
+  implementação de `MailService` — nenhum código de `AuthService` muda.
+
+## 12. Nova tabela `verification_tokens` (migration 2)
+
+- **Necessidade:** confirmação de e-mail e recuperação de senha (seção 5) exigem tokens de uso
+  único com expiração; a FASE 2 não previu essa tabela porque a estratégia de auth ainda não tinha
+  sido implementada.
+- **Alteração:** modelo `VerificationToken` (`userId`, `type` — `EMAIL_VERIFICATION` |
+  `PASSWORD_RESET`, `tokenHash` único, `expiresAt`, `usedAt`) + índice único adicional em
+  `refresh_tokens.token_hash` (necessário para localizar o token por hash no refresh/logout).
+- **Migration:** `prisma/migrations/20260824170000_auth_tokens/` (gerada via diff de schema, já
+  que a migration 1 nunca foi aplicada a um banco real — ver `apps/api/README.md`).
+- **Prisma/serviços atualizados:** `schema.prisma`, `AuthService` (emissão/consumo dos tokens),
+  `TokenService` (refresh tokens).
+- **Testes:** cobertura unitária adicionada para `RolesGuard` e para a extração de erro do filtro
+  global (`resolveErrorBody`) — ambos testáveis sem banco. Fluxos que dependem de Prisma (register/
+  login/refresh) ainda não têm teste automatizado; ver limitação de ambiente abaixo.
+
 ---
 
 ## Compatibilidade verificada nesta fase

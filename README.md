@@ -38,7 +38,7 @@ há nenhum arquivo "fictício" além dessas explicações.
   v24.19.0, compatível nesta fase)
 - npm `>=10`
 
-## Como executar (estado atual — FASE 2)
+## Como executar (estado atual — FASE 3)
 
 ```bash
 npm install
@@ -46,14 +46,15 @@ npm run lint
 npm run format:check
 ```
 
-Banco de dados (schema, migration inicial e seed já existem — ver `apps/api/README.md` para o
-passo a passo completo):
+API (banco de dados + backend/autenticação) — ver `apps/api/README.md` para o passo a passo
+completo, endpoints e limitações verificadas:
 
 ```bash
 cd apps/api
-cp .env.example .env        # ajuste DATABASE_URL para o seu PostgreSQL
+cp .env.example .env          # ajuste DATABASE_URL e troque os segredos JWT_*
 npm run prisma:migrate:dev
 npm run prisma:seed
+npm run start:dev             # http://localhost:3000 (Swagger em /docs)
 ```
 
 ## Roadmap
@@ -61,9 +62,9 @@ npm run prisma:seed
 | Fase | Escopo                         | Status                      |
 | ---- | ------------------------------ | --------------------------- |
 | 1    | Arquitetura geral              | ✅ concluída                |
-| 2    | Banco de dados e Prisma        | ✅ concluída (esta entrega) |
-| 3    | Backend e autenticação         | aguardando autorização      |
-| 4    | Cursos, módulos e aulas        | —                           |
+| 2    | Banco de dados e Prisma        | ✅ concluída                |
+| 3    | Backend e autenticação         | ✅ concluída (esta entrega) |
+| 4    | Cursos, módulos e aulas        | aguardando autorização      |
 | 5    | Controle de acesso e progresso | —                           |
 | 6    | Assinaturas e pagamentos       | —                           |
 | 7    | Player de vídeo                | —                           |
