@@ -1,0 +1,110 @@
+# ARCHITECTURE.md — Plataforma EdTech Musical Multi-Instrumentos
+
+Este documento registra as decisões arquiteturais tomadas na **FASE 1** e serve de referência
+para todas as fases seguintes. Para o modelo de dados completo e as estratégias por área
+(auth, pagamentos, streaming, player, metrônomo, afinador, segurança, testes, deploy), ver
+`docs/00-primeira-entrega.md`.
+
+Cada decisão é registrada como: **decisão → motivo → alternativas consideradas → impacto futuro**.
+
+---
+
+## 1. Monorepo com npm workspaces
+
+- **Decisão:** um único repositório com `apps/{api,admin,mobile}` e `packages/{shared,config}`,
+  orquestrado por `npm workspaces` (sem ferramenta de build adicional por enquanto).
+- **Motivo:** API, admin e mobile compartilham tipos/contratos de DTO e regras de validação;
+  monorepo evita duplicação e permite refatorar um contrato de API em um único PR que atualiza
+  todos os consumidores. `npm workspaces` já vem com o Node/npm instalado — zero ferramenta extra
+  para o time aprender nesta fase.
+- **Alternativas consideradas:** múltiplos repositórios (rejeitado: duplicaria tipos e dificultaria
+  manter contratos de API sincronizados); Turborepo/Nx (rejeitado por agora — overengineering
+  para o tamanho atual do projeto; pode ser adotado depois se o tempo de build/CI justificar,
+  sem quebrar a estrutura de pastas já definida).
+- **Impacto futuro:** se o monorepo crescer a ponto de builds ficarem lentos, dá para introduzir
+  cache de build (Turborepo/Nx) sem reestruturar diretórios, pois `apps/`/`packages/` já seguem a
+  convenção que essas ferramentas esperam.
+
+## 2. Backend único em NestJS, clientes múltiplos
+
+- **Decisão:** uma única API REST versionada (`/api/v1`) em NestJS/TypeScript é a fonte de verdade
+  para todas as regras de negócio; admin e mobile são apenas consumidores HTTP.
+- **Motivo:** controle de acesso a conteúdo pago e confirmação de pagamento **precisam** viver no
+  backend (regras 16 e 37 do prompt-mestre); centralizar em uma API evita duplicar essa lógica em
+  dois clientes com o risco de divergência/falha de segurança.
+- **Alternativas consideradas:** BFF (Backend for Frontend) separado por cliente (rejeitado nesta
+  fase: adiciona uma camada de rede e complexidade operacional sem necessidade real hoje);
+  GraphQL (rejeitado: REST é suficiente para o padrão de consumo do catálogo/progresso/assinaturas
+  e mantém a curva de aprendizado baixa; nada na arquitetura impede introduzir GraphQL depois como
+  camada adicional se necessário).
+- **Impacto futuro:** se um cliente futuro precisar de um formato de resposta muito diferente
+  (ex. app TV), um BFF pode ser adicionado na frente da API sem alterar os módulos de domínio.
+
+## 3. Abstração de integrações externas por interface
+
+- **Decisão:** pagamentos (`PaymentGateway`), storage (`StorageProvider`) e vídeo/streaming
+  (`VideoProvider`/`LiveProvider`) são acessados sempre através de uma interface definida no
+  domínio, nunca diretamente pelo SDK do provedor fora dessa camada.
+- **Motivo:** requisito explícito do prompt-mestre (seções 8, 9, 11, 14) — não travar o produto a
+  Stripe, Mux, S3 etc. Também reduz o raio de impacto de uma troca de fornecedor a um único
+  adapter.
+- **Alternativas consideradas:** integração direta do SDK do provedor nos services de domínio
+  (rejeitado: espalha detalhes de um fornecedor por todo o sistema, dificultando troca e testes —
+  violaria a regra 14 do prompt).
+- **Impacto futuro:** trocar de gateway de pagamento ou provedor de vídeo se resume a implementar
+  uma nova classe que satisfaz a interface e trocar a configuração (`PAYMENT_PROVIDER`,
+  `VIDEO_PROVIDER`); nenhum módulo de domínio precisa mudar.
+
+## 4. Node.js — versão de desenvolvimento vs. produção
+
+- **Decisão:** faixa suportada `>=20 <25` (`package.json engines`); `.nvmrc` fixa **20.11.0**
+  (LTS) como versão recomendada para Docker/CI/produção. A máquina de desenvolvimento atual roda
+  **Node v24.19.0**, que é compatível com a stack (NestJS, Prisma, Next.js, Expo) nesta fase.
+- **Motivo:** regra de compatibilidade do prompt-mestre (seção 35) exige verificar a versão antes
+  de gerar código. Node 24 funciona hoje, mas pinar produção em uma LTS (20) reduz risco de quebra
+  por mudanças em versões "current" do Node, que não têm o mesmo compromisso de estabilidade.
+- **Alternativas consideradas:** exigir Node 24 em todo lugar (rejeitado: 24 não é LTS, aumenta
+  risco de incompatibilidade futura com dependências que ainda não suportam Node "current");
+  travar em Node 18 (rejeitado: EOL mais próximo, sem ganho real).
+- **Impacto futuro:** ao gerar os `Dockerfile`s na FASE 13, a imagem base deve usar
+  `node:20-alpine` (ou LTS vigente na época), independentemente da versão local do desenvolvedor.
+
+## 5. Tooling compartilhado na raiz (TypeScript, ESLint, Prettier)
+
+- **Decisão:** `tsconfig.base.json`, `.eslintrc.cjs` e `.prettierrc` na raiz definem a baseline
+  (strict mode, regras comuns); cada app (`apps/api`, `apps/admin`, `apps/mobile`) estende essa
+  base e sobrepõe o que for específico do seu framework (ex. Next.js usa `moduleResolution`
+  diferente; Expo/RN tem preset próprio de babel/eslint).
+- **Motivo:** consistência de qualidade de código entre os três apps sem forçar configuração
+  idêntica onde os frameworks exigem algo diferente.
+- **Alternativas consideradas:** configuração 100% independente por app (rejeitado: gera deriva de
+  padrões — ex. um app sem `strict: true`); configuração 100% compartilhada sem override
+  (rejeitado: inviável, pois Next.js/Expo têm requisitos de config próprios e não opcionais).
+- **Impacto futuro:** nenhum — é o padrão esperado ao criar cada app nas fases seguintes (`extends`
+  do `tsconfig.base.json`).
+
+## 6. Redis como dependência condicional, não automática
+
+- **Decisão:** Redis entra na `docker-compose` e no código apenas quando um caso de uso real
+  existir (rate limiting, sessão de refresh token em cache, filas) — não é provisionado "por
+  padrão" nesta fase.
+- **Motivo:** regra 23 do prompt-mestre ("não introduzir Redis sem necessidade real"); evita
+  infraestrutura ociosa antes de haver funcionalidade que a use.
+- **Alternativas consideradas:** já subir Redis no compose desde a FASE 1 (rejeitado: nenhum
+  código o consome ainda, violaria a regra 39 — evitar overengineering).
+- **Impacto futuro:** Redis será adicionado ao `docker-compose` junto com o primeiro recurso que
+  o exigir (provavelmente rate limiting de login, na FASE 3).
+
+---
+
+## Compatibilidade verificada nesta fase
+
+| Ferramenta | Versão local        | Observação                                                      |
+| ---------- | ------------------- | --------------------------------------------------------------- |
+| Node.js    | v24.19.0            | compatível com a stack; produção fixa em 20 LTS (ver decisão 4) |
+| npm        | 11.17.0             | suporta workspaces nativamente                                  |
+| TypeScript | ^5.5.4 (a instalar) | compatível com NestJS 10/11, Next.js 14+, Expo SDK atual        |
+
+Versões específicas de NestJS, Prisma e Expo serão fixadas e validadas nas fases em que cada app
+for de fato criado (FASE 3, FASE 2/3 e FASE 10, respectivamente), conforme a regra 35 do
+prompt-mestre — nenhuma dessas dependências é instalada "adiantado" sem uso real.
