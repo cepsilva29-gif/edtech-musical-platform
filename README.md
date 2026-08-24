@@ -38,10 +38,7 @@ há nenhum arquivo "fictício" além dessas explicações.
   v24.19.0, compatível nesta fase)
 - npm `>=10`
 
-## Como executar (estado atual — FASE 1)
-
-Nesta fase só existe tooling de raiz (lint/format); ainda não há aplicação executável — isso
-chega na FASE 3 (API).
+## Como executar (estado atual — FASE 2)
 
 ```bash
 npm install
@@ -49,13 +46,23 @@ npm run lint
 npm run format:check
 ```
 
+Banco de dados (schema, migration inicial e seed já existem — ver `apps/api/README.md` para o
+passo a passo completo):
+
+```bash
+cd apps/api
+cp .env.example .env        # ajuste DATABASE_URL para o seu PostgreSQL
+npm run prisma:migrate:dev
+npm run prisma:seed
+```
+
 ## Roadmap
 
 | Fase | Escopo                         | Status                      |
 | ---- | ------------------------------ | --------------------------- |
-| 1    | Arquitetura geral              | ✅ concluída (esta entrega) |
-| 2    | Banco de dados e Prisma        | aguardando autorização      |
-| 3    | Backend e autenticação         | —                           |
+| 1    | Arquitetura geral              | ✅ concluída                |
+| 2    | Banco de dados e Prisma        | ✅ concluída (esta entrega) |
+| 3    | Backend e autenticação         | aguardando autorização      |
 | 4    | Cursos, módulos e aulas        | —                           |
 | 5    | Controle de acesso e progresso | —                           |
 | 6    | Assinaturas e pagamentos       | —                           |

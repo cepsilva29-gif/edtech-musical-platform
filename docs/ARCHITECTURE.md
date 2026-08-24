@@ -95,16 +95,44 @@ Cada decisão é registrada como: **decisão → motivo → alternativas conside
 - **Impacto futuro:** Redis será adicionado ao `docker-compose` junto com o primeiro recurso que
   o exigir (provavelmente rate limiting de login, na FASE 3).
 
+## 7. Prisma fixado em 6.12.0 (não a última major 7.9.1)
+
+- **Decisão:** `prisma`/`@prisma/client` fixados em **6.12.0** (versão exata, sem `^`), mantendo o
+  padrão clássico `datasource { url = env("DATABASE_URL") }` — sem driver adapter nem
+  `prisma.config.ts`.
+- **Motivo:** ao tentar instalar a última major (7.9.1), duas descobertas via teste real (não
+  suposição):
+  1. Prisma 7 **remove** `url` do bloco `datasource` do `schema.prisma` — a conexão passa a exigir
+     um driver adapter (`@prisma/adapter-pg`) instanciado no código e um `prisma.config.ts`
+     separado. É uma mudança arquitetural válida, mas adiciona uma camada de configuração sem
+     benefício concreto para este projeto agora (regra 39 — evitar overengineering).
+  2. `npm audit` acusou **3 vulnerabilidades altas** (`deepmerge-ts` < 8.0.0, stack
+     exhaustion/DoS — GHSA-ggr8-5vv4-36mx) presentes em `@prisma/config`, dependência transitiva
+     de **toda** versão do Prisma `>= 6.13.0-dev.1`, incluindo a própria 7.9.1. Ou seja, a versão
+     mais nova disponível hoje é a que está vulnerável; a correção não depende de qual versão
+     "mais atual" se escolhe, e sim de evitar a faixa afetada.
+- **Alternativas consideradas:** manter 7.9.1 e conviver com a vulnerabilidade (rejeitado — regra
+  38 do prompt-mestre: "se identificar vulnerabilidade, corrija antes de continuar"); usar a
+  última 6.x (6.19.3) (rejeitado — testado via `npm view`, ainda depende de
+  `deepmerge-ts@7.1.5`, vulnerável); adotar 7.9.1 mesmo com o driver adapter só para "estar na
+  última versão" (rejeitado — não compensa herdar a vulnerabilidade nem a complexidade extra sem
+  necessidade real).
+- **Impacto futuro:** quando a Prisma Data Platform publicar uma versão (6.x ou 7.x) que atualize
+  `deepmerge-ts` para `>= 8.0.0`, reavaliar o upgrade — nesse momento decidir também se vale migrar
+  para o modelo de driver adapter do Prisma 7. Até lá, `npm audit` deve continuar limpo; se voltar
+  a acusar algo nesta dependência, tratar antes de prosseguir para a próxima fase.
+
 ---
 
 ## Compatibilidade verificada nesta fase
 
-| Ferramenta | Versão local        | Observação                                                      |
-| ---------- | ------------------- | --------------------------------------------------------------- |
-| Node.js    | v24.19.0            | compatível com a stack; produção fixa em 20 LTS (ver decisão 4) |
-| npm        | 11.17.0             | suporta workspaces nativamente                                  |
-| TypeScript | ^5.5.4 (a instalar) | compatível com NestJS 10/11, Next.js 14+, Expo SDK atual        |
+| Ferramenta              | Versão local/instalada | Observação                                                              |
+| ----------------------- | ---------------------- | ----------------------------------------------------------------------- |
+| Node.js                 | v24.19.0               | compatível com a stack; produção fixa em 20 LTS (ver decisão 4)         |
+| npm                     | 11.17.0                | suporta workspaces nativamente                                          |
+| TypeScript              | ^5.5.4                 | compatível com NestJS 10/11, Next.js 14+, Expo SDK atual, Prisma 6.12.0 |
+| Prisma / @prisma/client | 6.12.0 (fixado)        | `npm audit` limpo (0 vulnerabilidades); ver decisão 7                   |
 
-Versões específicas de NestJS, Prisma e Expo serão fixadas e validadas nas fases em que cada app
-for de fato criado (FASE 3, FASE 2/3 e FASE 10, respectivamente), conforme a regra 35 do
-prompt-mestre — nenhuma dessas dependências é instalada "adiantado" sem uso real.
+Versões específicas de NestJS e Expo serão fixadas e validadas nas fases em que cada app for de
+fato criado (FASE 3 e FASE 10, respectivamente), conforme a regra 35 do prompt-mestre — nenhuma
+dessas dependências é instalada "adiantado" sem uso real.

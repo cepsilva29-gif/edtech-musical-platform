@@ -1,0 +1,417 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+  PENDING_VERIFICATION
+}
+
+enum CourseLevel {
+  INICIANTE
+  INTERMEDIARIO
+  AVANCADO
+}
+
+enum PublishStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum MaterialType {
+  PDF
+  CIFRA
+  PARTITURA
+  EXERCICIO
+}
+
+enum LiveStatus {
+  SCHEDULED
+  LIVE
+  FINISHED
+  CANCELED
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+  INCOMPLETE
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+}
+
+enum NotificationType {
+  NEW_LESSON
+  NEW_LIVE
+  LIVE_REMINDER
+  PAYMENT_APPROVED
+  PAYMENT_FAILED
+  SUBSCRIPTION_EXPIRING
+  COURSE_COMPLETED
+}
+
+// ---------------------------------------------------------------------------
+// Autenticação / Usuários / RBAC
+// ---------------------------------------------------------------------------
+
+model User {
+  id              String     @id @default(uuid()) @db.Uuid
+  name            String
+  email           String     @unique
+  passwordHash    String     @map("password_hash")
+  status          UserStatus @default(PENDING_VERIFICATION)
+  emailVerifiedAt DateTime?  @map("email_verified_at")
+  lastLoginAt     DateTime?  @map("last_login_at")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  userRoles          UserRole[]
+  refreshTokens      RefreshToken[]
+  taughtCourses      Course[]           @relation("CourseTeacher")
+  taughtLiveSessions LiveSession[]      @relation("LiveSessionTeacher")
+  progress           StudentProgress[]
+  subscriptions      UserSubscription[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+
+  @@map("users")
+}
+
+model Role {
+  id   String @id @default(uuid()) @db.Uuid
+  name String @unique // student | teacher | admin
+
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id       String @id @default(uuid()) @db.Uuid
+  resource String
+  action   String
+
+  rolePermissions RolePermission[]
+
+  @@unique([resource, action])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId String @map("user_id") @db.Uuid
+  roleId String @map("role_id") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash")
+  userAgent String?   @map("user_agent")
+  ip        String?
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo musical: Instrumentos -> Cursos -> Módulos -> Aulas
+// ---------------------------------------------------------------------------
+
+model Instrument {
+  id          String        @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String        @unique
+  description String?
+  iconUrl     String?       @map("icon_url")
+  status      PublishStatus @default(DRAFT)
+  order       Int           @default(0)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  courses      Course[]
+  liveSessions LiveSession[]
+
+  @@map("instruments")
+}
+
+model Course {
+  id           String        @id @default(uuid()) @db.Uuid
+  instrumentId String        @map("instrument_id") @db.Uuid
+  teacherId    String?       @map("teacher_id") @db.Uuid
+  title        String
+  slug         String        @unique
+  description  String?
+  level        CourseLevel
+  imageUrl     String?       @map("image_url")
+  status       PublishStatus @default(DRAFT)
+  order        Int           @default(0)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  instrument Instrument @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+  teacher    User?      @relation("CourseTeacher", fields: [teacherId], references: [id], onDelete: SetNull)
+  modules    Module[]
+
+  @@index([instrumentId, status])
+  @@map("courses")
+}
+
+model Module {
+  id          String        @id @default(uuid()) @db.Uuid
+  courseId    String        @map("course_id") @db.Uuid
+  title       String
+  description String?
+  order       Int           @default(0)
+  status      PublishStatus @default(DRAFT)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  course  Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons Lesson[]
+
+  @@index([courseId, order])
+  @@map("modules")
+}
+
+model Lesson {
+  id              String        @id @default(uuid()) @db.Uuid
+  moduleId        String        @map("module_id") @db.Uuid
+  title           String
+  description     String?
+  videoProvider   String?       @map("video_provider")
+  videoRef        String?       @map("video_ref")
+  durationSeconds Int           @default(0) @map("duration_seconds")
+  order           Int           @default(0)
+  status          PublishStatus @default(DRAFT)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  module    Module            @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  materials LessonMaterial[]
+  progress  StudentProgress[]
+
+  @@index([moduleId, order])
+  @@map("lessons")
+}
+
+model LessonMaterial {
+  id         String       @id @default(uuid()) @db.Uuid
+  lessonId   String       @map("lesson_id") @db.Uuid
+  type       MaterialType
+  title      String
+  storageKey String       @map("storage_key")
+  order      Int          @default(0)
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([lessonId, order])
+  @@map("lesson_materials")
+}
+
+// ---------------------------------------------------------------------------
+// Progresso do aluno
+// ---------------------------------------------------------------------------
+
+model StudentProgress {
+  id                  String    @id @default(uuid()) @db.Uuid
+  userId              String    @map("user_id") @db.Uuid
+  lessonId            String    @map("lesson_id") @db.Uuid
+  watchedSeconds      Int       @default(0) @map("watched_seconds")
+  lastPositionSeconds Int       @default(0) @map("last_position_seconds")
+  isCompleted         Boolean   @default(false) @map("is_completed")
+  completedAt         DateTime? @map("completed_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+  @@map("student_progress")
+}
+
+// ---------------------------------------------------------------------------
+// Transmissões ao vivo
+// ---------------------------------------------------------------------------
+
+model LiveSession {
+  id             String     @id @default(uuid()) @db.Uuid
+  instrumentId   String     @map("instrument_id") @db.Uuid
+  teacherId      String?    @map("teacher_id") @db.Uuid
+  title          String
+  description    String?
+  scheduledAt    DateTime   @map("scheduled_at")
+  status         LiveStatus @default(SCHEDULED)
+  streamProvider String?    @map("stream_provider")
+  streamRef      String?    @map("stream_ref")
+  playbackUrl    String?    @map("playback_url")
+  recordingRef   String?    @map("recording_ref")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  instrument Instrument @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+  teacher    User?      @relation("LiveSessionTeacher", fields: [teacherId], references: [id], onDelete: SetNull)
+
+  @@index([instrumentId, status, scheduledAt])
+  @@map("live_sessions")
+}
+
+// ---------------------------------------------------------------------------
+// Assinaturas / Pagamentos
+// ---------------------------------------------------------------------------
+
+model SubscriptionPlan {
+  id             String        @id @default(uuid()) @db.Uuid
+  name           String
+  description    String?
+  priceCents     Int           @map("price_cents")
+  currency       String        @default("BRL")
+  interval       String // month | year
+  trialDays      Int           @default(0) @map("trial_days")
+  status         PublishStatus @default(DRAFT)
+  gatewayPriceId String?       @map("gateway_price_id")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  subscriptions UserSubscription[]
+
+  @@map("subscription_plans")
+}
+
+model UserSubscription {
+  id                    String             @id @default(uuid()) @db.Uuid
+  userId                String             @map("user_id") @db.Uuid
+  planId                String             @map("plan_id") @db.Uuid
+  gateway               String
+  gatewaySubscriptionId String?            @unique @map("gateway_subscription_id")
+  status                SubscriptionStatus @default(INCOMPLETE)
+  currentPeriodStart    DateTime?          @map("current_period_start")
+  currentPeriodEnd      DateTime?          @map("current_period_end")
+  cancelAt              DateTime?          @map("cancel_at")
+  canceledAt            DateTime?          @map("canceled_at")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan     SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  invoices PaymentInvoice[]
+
+  @@index([userId, status])
+  @@map("user_subscriptions")
+}
+
+model PaymentInvoice {
+  id                 String        @id @default(uuid()) @db.Uuid
+  userSubscriptionId String        @map("user_subscription_id") @db.Uuid
+  amountCents        Int           @map("amount_cents")
+  currency           String        @default("BRL")
+  status             InvoiceStatus @default(PENDING)
+  gatewayInvoiceId   String?       @unique @map("gateway_invoice_id")
+  dueDate            DateTime?     @map("due_date")
+  paidAt             DateTime?     @map("paid_at")
+  receiptUrl         String?       @map("receipt_url")
+  createdAt          DateTime      @default(now()) @map("created_at")
+
+  userSubscription UserSubscription @relation(fields: [userSubscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([userSubscriptionId, status])
+  @@map("payment_invoices")
+}
+
+model PaymentWebhookEvent {
+  id          String             @id @default(uuid()) @db.Uuid
+  gateway     String
+  eventId     String             @map("event_id")
+  type        String
+  payload     Json
+  status      WebhookEventStatus @default(RECEIVED)
+  processedAt DateTime?          @map("processed_at")
+  createdAt   DateTime           @default(now()) @map("created_at")
+
+  @@unique([gateway, eventId])
+  @@map("payment_webhook_events")
+}
+
+// ---------------------------------------------------------------------------
+// Notificações / Auditoria
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  type      NotificationType
+  payload   Json?
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  action    String
+  entity    String
+  entityId  String?  @map("entity_id") @db.Uuid
+  metadata  Json?
+  ip        String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+  @@index([userId])
+  @@map("audit_logs")
+}

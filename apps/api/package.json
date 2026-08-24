@@ -1,0 +1,29 @@
+{
+  "name": "api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backend NestJS (FASE 3+). Nesta fase contém apenas o schema Prisma, migrations e seed.",
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
+  },
+  "scripts": {
+    "prisma:format": "prisma format",
+    "prisma:validate": "prisma validate",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:seed": "prisma db seed",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "6.12.0",
+    "bcryptjs": "^2.4.3"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.14.0",
+    "prisma": "6.12.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  }
+}
