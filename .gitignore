@@ -13,6 +13,7 @@ build/
 .env
 .env.local
 .env.*.local
+infra/docker/.env.prod
 
 # Logs
 *.log

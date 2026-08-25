@@ -971,6 +971,105 @@ next`); a raiz do monorepo nunca migrou para ESLint 9 porque nenhum app antes de
 - **Impacto futuro:** nenhum — o padrão deve ser seguido por qualquer teste de integração futuro que
   precise de um usuário com papéis não-`student`.
 
+## 52. Contexto de build dos Dockerfiles é a raiz do monorepo, não `apps/api`/`apps/admin`
+
+- **Decisão:** `apps/api/Dockerfile` e `apps/admin/Dockerfile` esperam ser buildados com
+  `context: ..` apontando para a **raiz do repo** (ver `infra/docker/docker-compose.yml`,
+  `context: ../..`), não a pasta do próprio app.
+- **Motivo:** ambos precisam enxergar além da própria pasta — `apps/api` precisa dos
+  `package.json` de todos os workspaces para `npm ci` respeitar o lockfile único do monorepo
+  (decisão 53); `apps/admin` precisa do **código-fonte** de `packages/shared`/`packages/music-tools`
+  (consumidos como TS cru, `"main": "src/index.ts"`, sem `dist` próprio — decisão original da FASE
+  8/10) para o build do Next conseguir transpilar essas dependências. Um contexto de build restrito
+  a `apps/api/`/`apps/admin/` simplesmente não alcançaria esses arquivos.
+- **Alternativas consideradas:** publicar `shared`/`music-tools` num registro npm interno e
+  instalá-los como dependência normal (rejeitado — infraestrutura desproporcional ao tamanho do
+  projeto nesta fase; o monorepo já resolve isso de graça via workspaces, bastando o contexto de
+  build certo). Pré-compilar `shared`/`music-tools` para `dist/` antes do build de `apps/admin`
+  (rejeitado — mudaria a decisão já tomada nas FASES 8/10 de consumi-los como fonte direta, só para
+  acomodar o Docker; o contexto de build correto resolve sem essa mudança).
+- **Impacto futuro:** qualquer novo Dockerfile de app cliente que consuma `packages/*` como fonte
+  precisa do mesmo contexto de build (raiz do repo), não só do seu próprio diretório.
+
+## 53. `npm ci` roda uma vez para o monorepo inteiro em cada imagem, depois `npm prune --omit=dev`
+
+- **Decisão:** a etapa `deps` de cada Dockerfile copia o `package.json` de **todos** os workspaces
+  (não só o que está sendo buildado) e roda um único `npm ci` na raiz; a etapa `runtime` só recebe o
+  resultado de `npm prune --omit=dev` rodado depois do build.
+- **Motivo:** `npm ci` valida que o `package-lock.json` corresponde exatamente ao conjunto de
+  `package.json` presentes — tentar restringir a instalação a um workspace específico (`npm ci -w
+apps/api`) é um caminho conhecido por ter comportamento inconsistente entre versões do npm em
+  monorepos com lockfile único, e esta sandbox não tem Docker para testar qual comportamento a
+  versão instalada teria. Instalar tudo uma vez (caminho garantido e documentado do npm) e podar
+  depois é mais lento na etapa `build`, mas comprovadamente correto — e a etapa `runtime` final
+  ainda fica enxuta, já que só recebe o `node_modules` **podado**, não o instalado por completo.
+- **Alternativas consideradas:** `npm ci -w <app>` (rejeitado pelo motivo acima — risco não
+  verificável nesta sandbox); um lockfile separado por app (rejeitado — contradiz a decisão 1
+  original do monorepo, "um lockfile único evita builds `works on my machine` de versões
+  divergentes").
+- **Impacto futuro:** se o tempo de build se tornar um problema real, revisitar com acesso a um
+  ambiente Docker de verdade para testar `npm ci -w` com segurança.
+
+## 54. `output: 'standalone'` do Next exigiu um `.gitkeep` em `apps/admin/public/`
+
+- **Decisão:** `apps/admin/next.config.ts` ganhou `output: 'standalone'`; `apps/admin/public/`
+  ganhou um `.gitkeep`. Verificado de verdade (`npm run build` local): o `server.js` da saída
+  standalone fica exatamente em `.next/standalone/apps/admin/server.js` — o caminho que
+  `apps/admin/Dockerfile` já assumia (`COPY`/`CMD`), confirmando que a detecção automática da raiz
+  do monorepo pelo Next preserva o prefixo `apps/admin/` como esperado.
+- **Motivo:** a saída `standalone` do Next não inclui `public/`/`.next/static` automaticamente (por
+  design da própria feature — precisam ser copiados manualmente no Dockerfile, o que
+  `apps/admin/Dockerfile` já faz). Ao revisar isso, um problema separado apareceu: a pasta
+  `apps/admin/public/` existe no disco desta sandbox (criada pelo scaffold do `create-next-app` na
+  FASE 11), mas está **vazia** — Git não versiona diretórios vazios, então um `git clone` limpo não
+  recriaria essa pasta, e o `COPY --from=build .../public ./apps/admin/public` do Dockerfile
+  falharia (`COPY` exige que a origem exista). Um `.gitkeep` garante que a pasta sempre exista após
+  um clone.
+- **Alternativas consideradas:** tornar o `COPY` do `public/` condicional/best-effort no Dockerfile
+  (rejeitado — `COPY` do Docker não tem um jeito nativo de "ignorar se não existir" sem recorrer a
+  truques frágeis; garantir que a pasta sempre exista é mais simples e correto).
+- **Impacto futuro:** nenhum — mas vale lembrar ao adicionar qualquer outra pasta que hoje só existe
+  "por acaso" no disco de desenvolvimento.
+
+## 55. `docker-compose.prod.yml` não tenta "remover" as portas publicadas de `api`/`admin` via merge
+
+- **Decisão:** o overlay de produção (`infra/docker/docker-compose.prod.yml`) redefine segredos,
+  `restart: unless-stopped` e adiciona o serviço `nginx`, mas **não** tenta zerar `ports:` de
+  `api`/`admin` para escondê-los atrás do nginx.
+- **Motivo:** o comportamento exato de merge de listas (`ports`) do Docker Compose ao combinar
+  múltiplos arquivos (`-f a -f b`) varia conforme o campo e a versão do Compose, e esta sandbox não
+  tem o binário `docker compose` para confirmar experimentalmente se `ports: []` no overlay
+  realmente substitui a lista base ou é ignorado/mesclado. Documentar um comportamento não testado
+  como se fosse garantido seria pior do que ser explícito sobre a limitação — ver
+  `infra/docker/docker-compose.prod.yml` e `infra/docker/README.md` para a alternativa recomendada
+  (remover `ports:` direto no arquivo base, ou fechar via firewall do host).
+- **Alternativas consideradas:** confiar no merge e documentar como se funcionasse (rejeitado —
+  arriscaria publicar `api`/`admin` sem querer numa deploy real, exatamente o tipo de erro "parece
+  certo mas não foi testado" que este projeto tem evitado desde a decisão de sempre ler o
+  comportamento real antes de assumir, decisão 34).
+- **Impacto futuro:** revisitar com acesso a um ambiente Docker real para confirmar o comportamento
+  de merge e, se favorável, simplificar o overlay.
+
+## 56. `.github/workflows/ci.yml` criado mesmo sem remoto GitHub configurado nesta sandbox
+
+- **Decisão:** o workflow de CI (lint/typecheck, testes unitários, testes de integração contra um
+  Postgres de serviço do próprio GitHub Actions, build das duas imagens Docker) foi escrito e
+  commitado mesmo este repositório não tendo um remote GitHub configurado nesta sandbox.
+- **Motivo:** `docs/00-primeira-entrega.md` (seção 15) já pede explicitamente "CI/CD: lint + testes
+  - build de imagem a cada PR" como parte do escopo da FASE 13 — o arquivo fica pronto e correto
+    sintaticamente para o momento em que o repositório for de fato publicado no GitHub, em vez de
+    adiar essa parte da fase só por não haver um remote agora. Os testes de integração usam o recurso
+    nativo de "service containers" do GitHub Actions (Postgres como serviço do job, não Docker-in-
+    Docker) — funciona independente de o runner ter o daemon Docker exposto ao workflow da forma como
+    os `docker build` da imagem final precisam.
+- **Alternativas consideradas:** não escrever CI nesta fase, deixando para quando houver um remote
+  (rejeitado — a seção 15 já define isso como parte do escopo da própria FASE 13, não de uma fase
+  futura; adiar sem necessidade real contradiz o próprio roadmap).
+- **Impacto futuro:** **nenhuma parte deste workflow foi executada de verdade** — nem localmente
+  (sem Docker/Actions runner nesta sandbox) nem num Actions real (sem remote). Antes de confiar
+  nele, publique o repositório no GitHub e observe a primeira execução real do workflow, corrigindo
+  qualquer detalhe de sintaxe/comportamento que só aparece rodando de fato.
+
 ---
 
 ## Compatibilidade verificada nesta fase

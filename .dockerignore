@@ -1,0 +1,24 @@
+# Contexto de build = raiz do monorepo (ver infra/docker/docker-compose.yml). Mantem as imagens
+# pequenas e os builds rapidos, excluindo tudo que os Dockerfiles nao precisam copiar do host.
+
+**/node_modules
+**/dist
+**/.next
+**/coverage
+**/*.tsbuildinfo
+
+.git
+.github
+
+# env reais nunca entram na imagem - variaveis de runtime vem do compose/orquestrador
+.env
+.env.*.local
+apps/*/.env
+apps/*/.env.*.local
+
+docs
+*.md
+
+.vscode
+.DS_Store
+Thumbs.db

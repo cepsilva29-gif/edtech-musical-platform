@@ -1,0 +1,63 @@
+# Overlay de producao - aplicado JUNTO com docker-compose.yml (nao sozinho: so redefine o que
+# muda de verdade entre dev/producao - segredos reais, restart automatico, e adiciona o nginx).
+#
+# Uso:
+#   docker compose -f infra/docker/docker-compose.yml -f infra/docker/docker-compose.prod.yml \
+#     --env-file infra/docker/.env.prod up -d --build
+#   docker compose -f infra/docker/docker-compose.yml -f infra/docker/docker-compose.prod.yml \
+#     run --rm migrate
+#
+# `.env.prod` (nao commitado - ver infra/docker/.env.prod.example) fornece DATABASE_URL/JWT_*/
+# NEXT_PUBLIC_API_URL reais. As portas de `api`/`admin` continuam publicadas no host por
+# `docker-compose.yml` (base) mesmo aqui - o merge de listas do Compose nao e usado para
+# "remover" isso (comportamento nao totalmente confiavel entre versoes do Compose sem testar
+# contra um Docker real, o que esta sandbox nao tem - ver docs/ARCHITECTURE.md, decisao da FASE
+# 13). Para um endurecimento real, o operador deve publicar `api`/`admin` só na rede interna do
+# Docker (remover o bloco `ports:` deles direto no arquivo base) ou fechar essas portas no
+# firewall do host, deixando so `nginx` (80/443) alcancavel de fora.
+
+services:
+  postgres:
+    restart: unless-stopped
+
+  redis:
+    restart: unless-stopped
+
+  api:
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-fake}
+      FAKE_PAYMENT_GATEWAY_SECRET: ${FAKE_PAYMENT_GATEWAY_SECRET:-}
+      VIDEO_PROVIDER: ${VIDEO_PROVIDER:-fake}
+      FAKE_VIDEO_PROVIDER_SECRET: ${FAKE_VIDEO_PROVIDER_SECRET:-}
+      LIVE_PROVIDER: ${LIVE_PROVIDER:-fake}
+      FAKE_LIVE_PROVIDER_SECRET: ${FAKE_LIVE_PROVIDER_SECRET:-}
+
+  migrate:
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+
+  admin:
+    restart: unless-stopped
+    build:
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+
+  nginx:
+    build:
+      context: ../..
+      dockerfile: infra/nginx/Dockerfile
+    depends_on:
+      - api
+      - admin
+    ports:
+      - '80:80'
+    restart: unless-stopped

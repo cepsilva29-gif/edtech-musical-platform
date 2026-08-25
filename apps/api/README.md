@@ -347,6 +347,20 @@ produção), `eslint`/`prettier` limpos. **Não foi possível rodar de fato** �
 acesso a Postgres nem Docker. Rode os comandos acima no seu ambiente antes de seguir para a próxima
 fase.
 
+## Docker e produção — FASE 13
+
+`Dockerfile` (nesta pasta) é um build multi-stage — ver `infra/docker/README.md` para como rodar
+(`docker compose -f infra/docker/docker-compose.yml up --build`, a partir da raiz do repo, já que o
+contexto de build é a raiz do monorepo, não `apps/api/`). A imagem final **não** roda
+`prisma migrate deploy` automaticamente no start — isso é uma etapa de release separada
+(`docker compose ... run --rm migrate`), para não ter múltiplas réplicas competindo pela mesma
+migration.
+
+`GET /health`/`GET /ready` (`src/health/`) já existiam desde a FASE 3 e são exatamente o par que um
+orquestrador espera: `/health` responde `200` assim que o processo sobe (liveness), `/ready` só
+responde `200` depois de confirmar uma conexão real com o Postgres (`SELECT 1`), senão `503`
+(readiness) — usado pelo `HEALTHCHECK` do `Dockerfile`.
+
 ## Estrutura atual
 
 ```

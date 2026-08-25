@@ -1,0 +1,93 @@
+# Stack de desenvolvimento: Postgres + Redis + api + admin, tudo containerizado (util para nao
+# precisar instalar Postgres localmente, ou para paridade com producao). Para desenvolvimento do
+# dia a dia com hot-reload, `npm run start:dev`/`npm run dev` locais (ver READMEs de cada app)
+# continuam mais rapidos - este compose e para rodar/validar as imagens de verdade.
+#
+# Uso (a partir da raiz do repo):
+#   docker compose -f infra/docker/docker-compose.yml up --build
+#   docker compose -f infra/docker/docker-compose.yml run --rm migrate   # aplica as migrations
+#
+# Redis esta incluido por completude com docs/00-primeira-entrega.md (secao 2) mesmo sem nenhum
+# codigo da API o consumir ainda - dependencia condicional, nao automatica (decisao 6 em
+# docs/ARCHITECTURE.md). Nao e injetado em nenhum modulo do Nest hoje.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: edtech_musical
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/edtech_musical?schema=public
+      JWT_SECRET: dev-secret-troque-em-producao
+      JWT_REFRESH_SECRET: dev-refresh-secret-troque-em-producao
+      CORS_ORIGIN: http://localhost:3001
+      PAYMENT_PROVIDER: fake
+      VIDEO_PROVIDER: fake
+      LIVE_PROVIDER: fake
+    ports:
+      - '3000:3000'
+
+  # Etapa de release separada (docs/00-primeira-entrega.md, secao 15) - roda `prisma migrate
+  # deploy` uma unica vez, nao a cada start do container `api` (evita replicas competindo pela
+  # mesma migration). Mesma imagem do `api`, comando sobrescrito.
+  migrate:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/edtech_musical?schema=public
+    entrypoint: ['npx', 'prisma', 'migrate', 'deploy']
+    profiles: ['tools']
+
+  admin:
+    build:
+      context: ../..
+      dockerfile: apps/admin/Dockerfile
+      args:
+        # Roda no BROWSER do usuario, entao precisa de uma URL alcancavel de fora do Docker
+        # network (nao do hostname interno `api`) - embutida no bundle JS no momento do build.
+        NEXT_PUBLIC_API_URL: http://localhost:3000/api/v1
+    depends_on:
+      - api
+    ports:
+      - '3001:3000'
+
+volumes:
+  postgres_data:
+  redis_data:

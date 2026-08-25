@@ -125,3 +125,11 @@ e abra `http://localhost:3000` para validar visualmente antes de seguir para a p
 
 Ver `.env.example`. Só `NEXT_PUBLIC_API_URL` é necessária (variáveis `NEXT_PUBLIC_*` ficam
 embutidas no bundle JS, então nunca coloque segredos aqui).
+
+## Docker — FASE 13
+
+`Dockerfile` (nesta pasta) usa o output `standalone` do Next (`next.config.ts`) — ver
+`infra/docker/README.md` para como rodar. Como `NEXT_PUBLIC_API_URL` fica embutida no bundle JS no
+momento do build (não do start do container), o build da imagem precisa do build-arg
+`NEXT_PUBLIC_API_URL` já apontando para a URL que o **navegador** do usuário alcança — não o
+hostname interno do Docker (`api`) — ver `infra/docker/docker-compose.yml`.

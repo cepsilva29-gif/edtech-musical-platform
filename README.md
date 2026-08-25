@@ -24,8 +24,8 @@ packages/
   config/       Schemas de validação de variáveis de ambiente
   music-tools/  Motores de metrônomo e afinador — estado/algoritmo puros (FASE 8)
 infra/
-  docker/       Dockerfiles e docker-compose (FASE 13+)
-  nginx/        Reverse proxy de produção (FASE 13+)
+  docker/       docker-compose (dev/produção); Dockerfiles ficam em apps/api e apps/admin (FASE 13)
+  nginx/        Reverse proxy de produção (FASE 13)
 docs/           Documentação técnica e de arquitetura
 tests/e2e/      Testes ponta-a-ponta cross-app (FASE 12)
 ```
@@ -39,7 +39,7 @@ há nenhum arquivo "fictício" além dessas explicações.
   v24.19.0, compatível nesta fase)
 - npm `>=10`
 
-## Como executar (estado atual — FASE 12)
+## Como executar (estado atual — FASE 13)
 
 ```bash
 npm install
@@ -86,6 +86,14 @@ integração") e o teste E2E cross-app dos 8 fluxos principais (contra a API rod
 `tests/e2e/README.md`) exigem um banco descartável e não foram executados nesta sandbox (sem acesso
 a Postgres/Docker aqui); ambos os READMEs documentam exatamente como rodá-los.
 
+Stack inteira via Docker (Postgres + Redis + API + admin — ver `infra/docker/README.md` para o
+overlay de produção com nginx):
+
+```bash
+docker compose -f infra/docker/docker-compose.yml up --build
+docker compose -f infra/docker/docker-compose.yml run --rm migrate   # prisma migrate deploy
+```
+
 ## Roadmap
 
 | Fase | Escopo                         | Status                      |
@@ -101,6 +109,6 @@ a Postgres/Docker aqui); ambos os READMEs documentam exatamente como rodá-los.
 | 9    | Lives                          | ✅ concluída                |
 | 10   | Aplicativo mobile              | ✅ concluída                |
 | 11   | Painel administrativo          | ✅ concluída                |
-| 12   | Testes                         | ✅ concluída (esta entrega) |
-| 13   | Docker e produção              | aguardando autorização      |
-| 14   | Auditoria final                | —                           |
+| 12   | Testes                         | ✅ concluída                |
+| 13   | Docker e produção              | ✅ concluída (esta entrega) |
+| 14   | Auditoria final                | aguardando autorização      |
