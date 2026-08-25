@@ -1191,37 +1191,64 @@ member 'PublishStatus'` (e outros enums/tipos gerados pelo Prisma). Causa raiz: 
   schema, não a pasta inteira) para dentro do estágio `deps` antes do `npm ci`, mantendo o cache de
   camada eficiente.
 
-## 62. Docker build falhava: `npm ci` com o workspace-alvo incompleto quebrava a resolução de módulos do build seguinte
+## 62. Docker build falhava: `tsconfig.base.json` da raiz nunca era copiado para dentro da imagem
 
-- **Decisão:** `apps/api/Dockerfile`/`apps/admin/Dockerfile` passaram a copiar o código-fonte
-  **completo** do workspace-alvo (e, no caso do admin, de `packages/shared`/`packages/music-tools`,
-  que ele consome como fonte TS crua) para dentro do estágio `deps`, **antes** de `npm ci` rodar —
-  não só o `package.json`, como a decisão 52/53 originalmente projetava. As demais workspaces
-  (irrelevantes para o build de cada imagem) continuam entrando só com o `package.json`.
-- **Motivo:** a decisão 56 já avisava que os Dockerfiles nunca tinham sido de fato construídos
-  nesta sandbox (sem Docker disponível). O job `build-images` do CI (real, no GitHub Actions, com
-  Docker de verdade) confirmou isso: `RUN npm run build --workspace=apps/api` falhava com `error
-TS2792: Cannot find module '@nestjs/common'` — um pacote que estava genuinamente instalado em
-  `/repo/node_modules` (confirmado via reprodução local do mesmo `npm ci` isolado), mas que o `tsc`
-  do `nest build` não conseguia resolver. Reproduzido localmente (fora do Docker, mas com o mesmo
-  `npm ci`/`npm run build --workspace=` isolado, só com os `package.json` copiados): o build só
-  passou a funcionar depois que o código-fonte completo de `apps/api` foi copiado **antes** do `npm
-ci` rodar, não depois. O mecanismo exato não foi isolado por completo (não é uma "exports" field
-  nem versão de TypeScript divergente — ambas descartadas), mas a evidência empírica é direta:
-  mesmo `npm ci`, mesmo `package-lock.json`, única variável trocada (ordem de cópia do código-fonte
-  vs. instalação), resultado consistente nos dois sentidos (falha com `package.json` só;
-  sucesso com o código-fonte completo presente).
-- **Alternativas consideradas:** manter a estrutura anterior (só `package.json` antes do `npm ci`,
-  otimizada para cache de camada do Docker) e investigar mais a fundo com acesso a um ambiente
-  Docker local (rejeitado por ora — esta sandbox não tem Docker; a única forma de validar qualquer
-  hipótese é a própria CI, e manter o build quebrado enquanto se investiga o mecanismo exato não é
-  aceitável quando já existe uma correção comprovada pela reprodução local).
-- **Impacto futuro:** perde-se parcialmente o benefício de cache de camada do Docker para o
-  workspace-alvo (qualquer edição de código-fonte agora invalida a camada de `npm ci` daquele
-  workspace também, não só quando `package.json` muda) — aceito como o preço da correção, dado que
-  o build estava simplesmente quebrado antes. Se o mecanismo exato for identificado depois (com
-  acesso a um ambiente Docker/Linux para depurar de verdade), reavaliar se dá para recuperar o
-  cache de camada sem reintroduzir a falha.
+- **Decisão:** `apps/api/Dockerfile` passou a copiar `tsconfig.base.json` (raiz do monorepo) para
+  dentro do estágio `build`, antes de `npm run build --workspace=apps/api` rodar.
+  `apps/admin/Dockerfile` **não** precisa do mesmo ajuste — seu `tsconfig.json` (gerado pelo
+  `create-next-app`) não usa `"extends"`, ao contrário de `apps/api`/`packages/shared`/
+  `packages/music-tools`, que apontam para `../../tsconfig.base.json`.
+- **Motivo:** causa raiz real, encontrada por eliminação sistemática via diagnóstico direto no CI
+  (não suposição): `RUN npm run build --workspace=apps/api` falhava com dezenas de `error TS2792:
+Cannot find module 'X'` — um erro para **cada** import de terceiros em **todo** arquivo (não só
+  `@nestjs/*`), o que já era estranho demais para ser um problema pontual de resolução de um
+  pacote específico. Duas tentativas anteriores de correção às cegas (copiar o código-fonte
+  completo antes do `npm ci`, achando que era uma questão de hoisting incompleto) não resolveram
+  nada — o mesmo erro persistiu identico depois de aplicadas, o que já devia ter sido o sinal de
+  que a causa estava em outro lugar. Um passo de diagnóstico explícito no Dockerfile (rodando
+  `npx tsc --noEmit -p apps/api/tsconfig.json` isoladamente dentro do build) revelou a causa real
+  logo na primeira linha: `error TS5083: Cannot read file '/repo/tsconfig.base.json'` —
+  `apps/api/tsconfig.json` usa `"extends": "../../tsconfig.base.json"`, e esse arquivo nunca tinha
+  sido copiado para dentro de nenhuma imagem. Sem o config base, TODAS as `compilerOptions`
+  herdadas dali (`module`, `moduleResolution` etc.) somem, e o sintoma visível vira "não encontra
+  nenhum pacote" em todo arquivo — o que pareceu, por várias iterações, ser um problema de
+  `node_modules`/hoisting, quando nunca foi.
+- **Alternativas consideradas:** a tentativa anterior (copiar o código-fonte completo de
+  `apps/api`/`apps/admin` antes do `npm ci`, na hipótese de um hoisting incompleto) foi revertida
+  depois de confirmado que não era a causa real — mantê-la seria pagar o custo de cache de camada
+  do Docker por uma correção que não corrigia nada. A lição principal aqui: quando uma correção
+  "não muda o resultado" (mesmo erro, idêntico, depois de aplicada), isso é sinal de hipótese
+  errada, não de correção incompleta — parar de iterar sobre a mesma teoria e coletar evidência
+  direta (um passo de diagnóstico descartável no próprio Dockerfile) foi o que resolveu, não mais
+  uma tentativa às cegas.
+- **Impacto futuro:** qualquer novo workspace/pacote que passe a usar
+  `"extends": "../../tsconfig.base.json"` precisa copiar esse arquivo no Dockerfile correspondente,
+  se algum dia ganhar um.
+
+## 63. Testes de integração estouravam o throttle de `POST /auth/register` — corrigido com um guard ciente de `NODE_ENV`
+
+- **Decisão:** `AppThrottlerGuard` (`src/common/guards/app-throttler.guard.ts`), uma subclasse fina
+  de `ThrottlerGuard` que só deixa passar tudo quando `NODE_ENV=test`, registrada no lugar do
+  `ThrottlerGuard` padrão em `AppModule`.
+- **Motivo:** o primeiro run real do job `integration-tests` no CI falhou em 7 dos 16 testes, todos
+  com `ThrottlerException: Too Many Requests` — `POST /auth/register` tem um limite de 5/60s
+  (decisão de segurança deliberada da FASE 3), e cada arquivo de teste de integração registra vários
+  usuários por `it()`, estourando o limite bem antes dos 60s. A primeira tentativa de correção
+  (`Test.createTestingModule(...).overrideGuard(ThrottlerGuard).useValue(noop)` no bootstrap de
+  teste) não teve nenhum efeito — o mesmo erro se repetiu identicamente numa segunda execução real
+  do CI. Em vez de insistir em depurar a mecânica de override de testing do NestJS sem conseguir
+  reproduzir localmente (sem Postgres nesta sandbox para rodar os testes de integração de verdade),
+  a correção foi movida para dentro do próprio guard — determinística, fácil de raciocinar sobre, e
+  independente de qualquer comportamento de `@nestjs/testing` que não pôde ser verificado aqui.
+- **Alternativas consideradas:** insistir no `overrideGuard()` investigando mais a fundo (rejeitado
+  — sem conseguir rodar os testes de integração localmente, cada tentativa custaria outro round-trip
+  de CI; um guard condicional por `NODE_ENV` é verificável só de lendo o código). Reduzir o número de
+  registros por arquivo de teste, reaproveitando usuários entre `it()`s (rejeitado — complicaria os
+  testes e fugiria do padrão "cada teste arranja seu próprio cenário" já estabelecido desde a
+  FASE 12).
+- **Impacto futuro:** nenhum — `NODE_ENV=test` já é setado por `test/setup-env.ts` (via
+  `.env.test.local`) e pelo job `integration-tests` do CI; dev/staging/produção continuam com o
+  throttle original.
 
 ---
 

@@ -11,17 +11,13 @@ RUN apk add --no-cache openssl
 
 # -----------------------------------------------------------------------------
 # deps: instala TODAS as dependencias do monorepo (workspaces npm nao suportam instalar so um
-# workspace sem risco de divergir do lockfile - ver docs/ARCHITECTURE.md, decisao da FASE 13).
-# apps/api entra com o codigo-fonte COMPLETO (nao so o package.json) - achado real de CI: `npm ci`
-# rodando so com os package.json (sem o restante de apps/api presente ainda) produzia um
-# node_modules que quebrava a resolucao de modulos do TypeScript ("Cannot find module
-# '@nestjs/common'") na etapa de build seguinte. As outras workspaces (admin/mobile/shared/
-# music-tools/tests-e2e) continuam so com o package.json - nao sao necessarias como fonte completa
-# para buildar apps/api, so para o npm ci reconhecer a estrutura de workspaces do lockfile.
+# workspace sem risco de divergir do lockfile - ver docs/ARCHITECTURE.md, decisao da FASE 13). So
+# copia os package.json de cada workspace (nao o codigo-fonte), para o cache de camada do Docker
+# só invalidar esta etapa quando alguma dependência mudar, não a cada edição de código.
 # -----------------------------------------------------------------------------
 FROM base AS deps
 COPY package.json package-lock.json ./
-COPY apps/api apps/api
+COPY apps/api/package.json apps/api/package.json
 COPY apps/admin/package.json apps/admin/package.json
 COPY apps/mobile/package.json apps/mobile/package.json
 COPY packages/shared/package.json packages/shared/package.json
@@ -33,15 +29,19 @@ RUN npm ci
 # build: gera o Prisma Client e compila o Nest (tsconfig.build.json ja exclui test/ - decisao da
 # FASE 12). DATABASE_URL fake so para satisfazer a validacao sintatica do schema.prisma no
 # `generate` - nenhuma conexao real acontece nesta etapa.
+#
+# tsconfig.base.json (raiz do monorepo) precisa estar presente aqui - apps/api/tsconfig.json usa
+# "extends": "../../tsconfig.base.json". Achado real via CI (decisao 63 em docs/ARCHITECTURE.md):
+# sem esse arquivo, `tsc` falha com TS5083 ("Cannot read file .../tsconfig.base.json") e, por
+# tabela, perde TODAS as compilerOptions herdadas (module/moduleResolution etc.) - o sintoma visivel
+# vira "Cannot find module '@nestjs/common'" (e qualquer outro pacote) em todo arquivo, o que
+# pareceu por um bom tempo ser um problema de resolucao de node_modules, mas nunca foi.
 # -----------------------------------------------------------------------------
 FROM deps AS build
 ENV DATABASE_URL="postgresql://user:pass@localhost:5432/db"
+COPY tsconfig.base.json ./
+COPY apps/api apps/api
 RUN npm run prisma:generate --workspace=apps/api
-RUN echo "--- DEBUG: tsc -p tsconfig.json (base, mesmo do job lint-and-typecheck que passa) ---" \
- && (npx tsc --noEmit -p apps/api/tsconfig.json && echo "BASE_TSCONFIG_OK" || echo "BASE_TSCONFIG_FAILED") \
- && echo "--- DEBUG: tsc -p tsconfig.build.json (o que nest build usa) ---" \
- && (npx tsc --noEmit -p apps/api/tsconfig.build.json && echo "BUILD_TSCONFIG_OK" || echo "BUILD_TSCONFIG_FAILED") \
- && echo "--- END DEBUG ---"
 RUN npm run build --workspace=apps/api
 RUN npm prune --omit=dev
 

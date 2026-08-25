@@ -7,29 +7,30 @@ FROM node:20-alpine AS base
 WORKDIR /repo
 
 # -----------------------------------------------------------------------------
-# deps: mesma logica de apps/api/Dockerfile - instala tudo uma vez, hoisted na raiz. apps/admin,
-# packages/shared e packages/music-tools entram com o codigo-fonte COMPLETO antes do `npm ci` (nao
-# so o package.json) - mesmo achado real de CI documentado em apps/api/Dockerfile: `npm ci` com o
-# workspace-alvo ainda incompleto produzia um node_modules que quebrava a resolucao de modulos do
-# TypeScript no build seguinte. `shared`/`music-tools` tambem precisam do codigo-fonte aqui porque
-# sao consumidos como TS cru pelo Next (sem `dist` proprio - packages/shared/package.json, "main":
-# "src/index.ts"). apps/api/apps/mobile/tests/e2e continuam so com o package.json - nao sao
-# necessarios como fonte completa para buildar apps/admin.
+# deps: mesma logica de apps/api/Dockerfile - instala tudo uma vez, hoisted na raiz.
 # -----------------------------------------------------------------------------
 FROM base AS deps
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
-COPY apps/admin apps/admin
+COPY apps/admin/package.json apps/admin/package.json
 COPY apps/mobile/package.json apps/mobile/package.json
-COPY packages/shared packages/shared
-COPY packages/music-tools packages/music-tools
+COPY packages/shared/package.json packages/shared/package.json
+COPY packages/music-tools/package.json packages/music-tools/package.json
 COPY tests/e2e/package.json tests/e2e/package.json
 RUN npm ci
 
 # -----------------------------------------------------------------------------
-# build: fonte completa ja presente da etapa `deps` - so falta buildar.
+# build: `shared`/`music-tools` sao consumidos como fonte TS crua (sem dist proprio - ver
+# packages/shared/package.json, "main": "src/index.ts"), entao o build do Next precisa do
+# codigo-fonte deles disponivel aqui, nao so do package.json. `apps/admin/tsconfig.json` (gerado
+# pelo create-next-app) nao usa "extends" - ao contrario de apps/api/tsconfig.json, nao depende do
+# tsconfig.base.json da raiz (ver decisao 63 em docs/ARCHITECTURE.md), entao nao precisa ser
+# copiado aqui.
 # -----------------------------------------------------------------------------
 FROM deps AS build
+COPY packages/shared packages/shared
+COPY packages/music-tools packages/music-tools
+COPY apps/admin apps/admin
 ARG NEXT_PUBLIC_API_URL=/api/v1
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN npm run build --workspace=apps/admin
