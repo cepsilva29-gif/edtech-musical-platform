@@ -65,3 +65,62 @@ export interface LessonMaterial {
   order: number;
   createdAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// Escrita (CRUD administrativo/professor - apps/admin, FASE 11)
+// ---------------------------------------------------------------------------
+
+export interface CreateInstrumentRequest {
+  name: string;
+  slug?: string;
+  description?: string;
+  iconUrl?: string;
+  status?: PublishStatus;
+  order?: number;
+}
+
+export type UpdateInstrumentRequest = Partial<CreateInstrumentRequest>;
+
+export interface CreateCourseRequest {
+  instrumentId: string;
+  teacherId?: string;
+  title: string;
+  slug?: string;
+  description?: string;
+  level: CourseLevel;
+  imageUrl?: string;
+  status?: PublishStatus;
+  order?: number;
+}
+
+export type UpdateCourseRequest = Partial<CreateCourseRequest>;
+
+export interface CreateCourseModuleRequest {
+  title: string;
+  description?: string;
+  status?: PublishStatus;
+  order?: number;
+}
+
+export type UpdateCourseModuleRequest = Partial<CreateCourseModuleRequest>;
+
+export interface CreateLessonRequest {
+  title: string;
+  description?: string;
+  videoProvider?: string;
+  videoRef?: string;
+  durationSeconds?: number;
+  status?: PublishStatus;
+  order?: number;
+}
+
+export type UpdateLessonRequest = Partial<CreateLessonRequest>;
+
+export interface CreateLessonMaterialRequest {
+  type: MaterialType;
+  title: string;
+  storageKey: string;
+  order?: number;
+}
+
+export type UpdateLessonMaterialRequest = Partial<CreateLessonMaterialRequest>;

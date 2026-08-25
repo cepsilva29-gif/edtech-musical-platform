@@ -17,10 +17,10 @@ player, metrônomo, afinador, segurança, testes, deploy) está em:
 ```
 apps/
   api/          Backend NestJS + TypeScript (FASE 3+)
-  admin/        Painel administrativo Next.js (FASE 11+)
+  admin/        Painel administrativo Next.js (FASE 11)
   mobile/       App do aluno React Native/Expo (FASE 10)
 packages/
-  shared/       Tipos/DTOs compartilhados entre api/admin/mobile (populado na FASE 10)
+  shared/       Tipos/DTOs compartilhados entre api/admin/mobile (populado na FASE 10, ampliado na FASE 11)
   config/       Schemas de validação de variáveis de ambiente
   music-tools/  Motores de metrônomo e afinador — estado/algoritmo puros (FASE 8)
 infra/
@@ -39,7 +39,7 @@ há nenhum arquivo "fictício" além dessas explicações.
   v24.19.0, compatível nesta fase)
 - npm `>=10`
 
-## Como executar (estado atual — FASE 10)
+## Como executar (estado atual — FASE 11)
 
 ```bash
 npm install
@@ -67,6 +67,14 @@ cp .env.example .env          # ajuste EXPO_PUBLIC_API_URL se a API nao estiver 
 npm start
 ```
 
+Painel administrativo/professor (Next.js — aponte para a API acima; ver `apps/admin/README.md`):
+
+```bash
+cd apps/admin
+cp .env.example .env.local    # ajuste NEXT_PUBLIC_API_URL se a API nao estiver em localhost:3000
+npm run dev                   # http://localhost:3000 (ou a porta livre seguinte)
+```
+
 Motores de metrônomo/afinador (sem servidor, sem banco — ver `packages/music-tools/README.md`):
 
 ```bash
@@ -86,8 +94,8 @@ npm test --workspace=music-tools
 | 7    | Player de vídeo                | ✅ concluída                |
 | 8    | Metrônomo e afinador           | ✅ concluída                |
 | 9    | Lives                          | ✅ concluída                |
-| 10   | Aplicativo mobile              | ✅ concluída (esta entrega) |
-| 11   | Painel administrativo          | aguardando autorização      |
-| 12   | Testes                         | —                           |
+| 10   | Aplicativo mobile              | ✅ concluída                |
+| 11   | Painel administrativo          | ✅ concluída (esta entrega) |
+| 12   | Testes                         | aguardando autorização      |
 | 13   | Docker e produção              | —                           |
 | 14   | Auditoria final                | —                           |

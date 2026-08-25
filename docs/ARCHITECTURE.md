@@ -719,6 +719,159 @@ gateway_customer_id)` — mudança isolada, sem afetar `PaymentGateway`/`Subscri
 - **Impacto futuro:** quando `apps/admin` (FASE 11) for criado, ele consome exatamente os endpoints
   de gestão que este app deliberadamente não usa — nenhuma mudança de contrato de API necessária.
 
+## 39. `apps/admin` (FASE 11): Next.js App Router, sem SSR autenticado
+
+- **Decisão:** painel administrativo/professor construído em Next.js 16 (App Router) + React 19 +
+  Tailwind v4, mas **inteiramente client-rendered** para tudo que depende de sessão — não há
+  autenticação no servidor (`middleware.ts`/RSC com cookies), o `AuthProvider` roda no cliente e
+  decide o redirecionamento via `useEffect`, igual ao padrão já usado em `apps/mobile`.
+- **Motivo:** o backend (`apps/api`) já expõe uma API REST versionada com JWT de acesso curto +
+  refresh rotativo (decisão 8) — não existe sessão baseada em cookie do lado do servidor Next.js
+  para reaproveitar. Implementar SSR autenticado exigiria um mecanismo de sessão próprio do Next
+  (cookies httpOnly geridos por Route Handlers) só para este painel, contradizendo a decisão 2
+  ("backend único, clientes múltiplos" — a fonte de verdade de auth é sempre `apps/api`).
+- **Alternativas consideradas:** SSR com cookies httpOnly geridos por Route Handlers do Next
+  (rejeitado nesta fase — mais seguro, mas exigiria duplicar/adaptar o fluxo de refresh token só
+  para este app; ver decisão 41 sobre a troca de segurança aceita). Migrar para uma sessão NextAuth
+  (rejeitado — adicionaria uma segunda fonte de verdade de identidade, quando `apps/api` já é essa
+  fonte).
+- **Impacto futuro:** se o painel crescer para justificar SSR autenticado (ex.: SEO, listagens
+  muito grandes), reavaliar via Route Handlers com cookies httpOnly — ver decisão 41.
+
+## 40. Endpoints administrativos de usuários adicionados a `apps/api` durante a FASE 11
+
+- **Decisão:** `UsersController`/`UsersService` ganharam `GET /users` (lista paginada, com
+  filtro por `status`/`role`/`search`), `GET /users/:id`, `PATCH /users/:id/roles` e
+  `PATCH /users/:id/status` — todos `@Roles('admin')`. `UsersService.toAdminView()` centraliza o
+  shape de resposta, reaproveitado também por `GET /users/me`.
+- **Motivo:** ao construir a tela de gestão de usuários do `apps/admin`, não havia nenhum endpoint
+  de leitura/gestão de usuários além do `me` — gap real descoberto organicamente, mesmo padrão já
+  seguido nas decisões 22/23/29 (corrigir a lacuna no momento em que ela bloqueia o app real, em vez
+  de reprojetar `apps/api` inteiro adiantado).
+- **Alternativas consideradas:** gerenciar papéis/status diretamente no banco via seed/script
+  administrativo (rejeitado — não é operável no dia a dia por um admin real, contradiz o próprio
+  propósito de um painel administrativo). Reaproveitar `PATCH /users/me` com um `userId` extra no
+  corpo (rejeitado — misturaria o contrato de "auto-atualização" com o de "gestão de terceiros",
+  exigindo checagem de permissão condicional dentro do mesmo endpoint).
+- **Impacto futuro:** nenhum. `packages/shared` ganhou `ListUsersQuery`/`UpdateUserRolesRequest`/
+  `UpdateUserStatusRequest` (`src/users.ts`) e os tipos de escrita do catálogo/planos que faltavam
+  (`CreateXRequest`/`UpdateXRequest` em `catalog.ts`/`subscriptions.ts`), todos consumidos por
+  `apps/admin`.
+
+## 41. Tokens em `localStorage` no `apps/admin` — tradeoff de segurança documentado, não ignorado
+
+- **Decisão:** `auth-storage.ts` do admin guarda `accessToken`/`refreshToken` em `localStorage`
+  (síncrono, ao contrário do `expo-secure-store` assíncrono do mobile).
+- **Motivo:** dado que este app é client-rendered sem sessão de servidor (decisão 39), a alternativa
+  mais segura de verdade — cookie `httpOnly` setado por um Route Handler do Next — exigiria que
+  **toda** chamada à API passasse por um proxy no próprio Next.js (para o cookie nunca ser lido por
+  JS, ele também não pode ser anexado manualmente ao `Authorization` header de um `fetch` direto ao
+  `apps/api`). Isso duplicaria a camada de rede inteira só para este painel. `localStorage` é
+  vulnerável a XSS (um script malicioso injetado pode ler o token), mas o painel roda atrás de login
+  obrigatório para um público restrito (professores/admins da própria plataforma), não usuários
+  finais anônimos — risco aceito e documentado, não descoberto tarde.
+- **Alternativas consideradas:** cookie `httpOnly` via proxy Next (rejeitado nesta fase pelo custo
+  de implementação vs. o público restrito do painel — ver "Impacto futuro"); `sessionStorage`
+  (rejeitado — perderia a sessão a cada fechamento de aba, pior UX para um painel usado o dia
+  inteiro, sem reduzir a exposição a XSS, que é o risco real aqui).
+- **Impacto futuro:** se o painel for exposto a um público maior/menos confiável, migrar para
+  cookies `httpOnly` + proxy de API via Route Handlers.
+
+## 42. ESLint com dois configs em `apps/admin` (flat config do Next 9 + legado 8 da raiz)
+
+- **Decisão:** `apps/admin` mantém **dois** arquivos de config: `eslint.config.mjs` (flat config,
+  gerado pelo `create-next-app`, roda via `cd apps/admin && npm run lint`, usa ESLint 9 + as regras
+  específicas do Next) e `.eslintrc.cjs` (legado, `root: false`, mesmo padrão de
+  `apps/mobile/.eslintrc.cjs` da decisão 33 — herdado pelo `npm run lint` da raiz do monorepo, que
+  ainda roda em ESLint 8).
+- **Motivo:** Next.js 16 exige ESLint 9 (flat config) para suas próprias regras (`eslint-config-
+  next`); a raiz do monorepo nunca migrou para ESLint 9 porque nenhum app antes de `apps/mobile`
+  (FASE 10) precisava de suporte a JSX. Migrar a raiz inteira para ESLint 9 agora arriscaria quebrar
+  o lint já funcionando de `apps/api`/`apps/mobile` sem necessidade real — mesmo raciocínio da
+  decisão 5 ("tooling compartilhado, mas sem forçar upgrade sem motivo").
+- **Alternativas consideradas:** migrar todo o monorepo para ESLint 9 agora (rejeitado — escopo
+  maior que o necessário para a FASE 11, risco desnecessário para `apps/api`/`apps/mobile`);
+  desativar o lint da raiz para `apps/admin` (rejeitado — perderia cobertura das regras
+  compartilhadas, ex. `eslint-plugin-react-hooks` v7, que já pegou bugs reais nesta mesma fase — ver
+  decisão 45).
+- **Impacto futuro:** revisitar quando o monorepo inteiro migrar para ESLint 9 (provável quando
+  `apps/api`/`apps/mobile` também precisarem de alguma regra só disponível em flat config).
+
+## 43. `hls.js` para o player de preview web do admin
+
+- **Decisão:** `HlsVideo` (`apps/admin/src/features/player/hls-video.tsx`) usa `hls.js` para tocar
+  HLS em qualquer navegador; só faz `video.src = src` direto quando o navegador já suporta HLS
+  nativamente (`canPlayType('application/vnd.apple.mpegurl')`, verdadeiro no Safari).
+- **Motivo:** `docs/00-primeira-entrega.md` (seção 10) já previa "Player web (admin/preview) baseado
+  em HLS.js/Video.js" — `<video>` nativo não decodifica HLS via MSE fora do Safari, e tanto o
+  preview de aula (`GET /lessons/:id/playback`, decisão 25) quanto o de live (`GET
+  /live-sessions/:id/playback`, decisão 29/30) devolvem URLs HLS.
+- **Alternativas consideradas:** Video.js (citado como alternativa no próprio prompt-mestre;
+  rejeitado por trazer sua própria UI de player/CSS quando só o preview é necessário aqui — `hls.js`
+  é só a camada MSE, reaproveitando o `<video>` nativo/estilizado com Tailwind).
+- **Impacto futuro:** nenhum — mesmo componente é reaproveitado tanto na tela de aula quanto na de
+  live.
+
+## 44. Metrônomo/afinador do admin usam Web Audio API — precisão real, não JS-timer-limited
+
+- **Decisão:** `use-metronome-web.ts`/`use-tuner-web.ts` (`apps/admin/src/features/`) usam
+  `AudioContext` de verdade: o metrônomo agenda cada clique com `oscillator.start(tick.time)` no
+  clock de alta precisão do `AudioContext`, e o afinador captura PCM real via
+  `getUserMedia` + `ScriptProcessorNode`. Ambos consomem o mesmo `MetronomeEngine`/`detectPitch` de
+  `packages/music-tools` que o mobile usa.
+- **Motivo:** a decisão 35 documentou que o clique do metrônomo no mobile herda o jitter do timer JS
+  porque o Expo gerenciado não expõe um `AudioContext` real — o browser expõe. Implementar a versão
+  web com a mesma precisão que a arquitetura sempre permitiu (mas o mobile não podia entregar) é o
+  "acabamento" natural dessa limitação já conhecida, sem custo extra: o motor puro já suportava
+  lookahead scheduling desde a FASE 8 (decisão 27), só faltava um ambiente com clock de audio real
+  para explorá-lo por completo.
+- **Alternativas consideradas:** reaproveitar arquivos `.wav` como no mobile (rejeitado — um
+  `OscillatorNode` gerado em runtime evita carregar/decodificar assets binários só para um beep
+  curto, e o Web Audio API já suporta osciladores nativamente). `AudioWorkletNode` em vez de
+  `ScriptProcessorNode` para o afinador (rejeitado nesta fase — `ScriptProcessorNode` está
+  depreciado mas amplamente suportado e não exige um arquivo worklet separado; aceitável para uma
+  ferramenta de preview de professor, não um produto de áudio profissional — documentado em
+  comentário no próprio arquivo).
+- **Impacto futuro:** migrar o afinador para `AudioWorkletNode` se `ScriptProcessorNode` for
+  removido dos navegadores suportados.
+
+## 45. Ajustar estado durante a renderização em vez de `useEffect` + `setState` (`apps/admin`)
+
+- **Decisão:** telas que inicializam campos editáveis a partir de dados carregados via
+  `@tanstack/react-query` (`usuarios/[id]`, `aulas/[id]`) usam o padrão "ajustar estado durante o
+  render" (guardado por um `initializedFor === data.id`) em vez de `useEffect(() => setX(...), [data])`.
+- **Motivo:** `eslint-plugin-react-hooks` v7 (já adotado desde a decisão 36) sinalizou
+  `react-hooks/set-state-in-effect` nos dois arquivos — `setState` síncrono dentro de um efeito
+  causa um re-render em cascata desnecessário. A correção recomendada pela própria documentação do
+  React (e pelo lint) é calcular/ajustar o estado durante a renderização quando a atualização é uma
+  simples sincronização de "dado chegou → inicializa o form", não um efeito colateral real sobre um
+  sistema externo.
+- **Alternativas consideradas:** manter o `useEffect` e silenciar a regra (rejeitado — mesmo
+  raciocínio da decisão 36: a regra pegou um padrão real, não um falso positivo — silenciar
+  esconderia a cascata de render em vez de removê-la). Resetar via `key` no componente (rejeitado —
+  re-montaria a árvore inteira da tela a cada navegação de id, mais caro que a guarda condicional).
+- **Impacto futuro:** aplicar o mesmo padrão em qualquer tela futura que precise inicializar estado
+  editável a partir de uma query assíncrona.
+
+## 46. Pasta de rotas do dashboard: `dashboard/`, não `(dashboard)/` — grupo de rotas não gera segmento de URL
+
+- **Decisão:** as telas autenticadas do admin vivem em `apps/admin/src/app/dashboard/` (segmento
+  real de URL: `/dashboard/cursos`, `/dashboard/aulas/[id]` etc.), não em
+  `app/(dashboard)/` como escrito inicialmente.
+- **Motivo:** bug real pego pelo próprio `next build` (a tabela de rotas do build mostrou
+  `/cursos`, `/aulas/[id]` etc. sem o prefixo `/dashboard`) — em nome de pasta entre parênteses, o
+  Next.js App Router trata como **grupo de rotas** (organização de arquivos/layouts compartilhados),
+  que deliberadamente **não** vira segmento de URL. Como todo `Link`/`router.replace` do app já
+  apontava para `/dashboard/...` (inclusive `app/page.tsx`, que redireciona para `/dashboard` após
+  login), o grupo `(dashboard)/page.tsx` também colidia silenciosamente com `app/page.tsx` na
+  mesma rota `/`. Corrigido renomeando a pasta (mesma estrutura de arquivos, sem outra mudança).
+- **Alternativas consideradas:** manter `(dashboard)` e reescrever todos os `href`/`router.replace`
+  para as URLs reais sem prefixo (rejeitado — perderia o prefixo `/dashboard` que separa
+  visualmente/semanticamente a área autenticada da pública, sem ganho real).
+- **Impacto futuro:** nenhum — mas reforça a lição já registrada na decisão 34 ("ler o `.d.ts`/
+  comportamento real antes de assumir") — aqui o achado só apareceu porque a tabela de rotas do
+  `next build` foi de fato lida e conferida, não só "build passou sem erro".
+
 ---
 
 ## Compatibilidade verificada nesta fase

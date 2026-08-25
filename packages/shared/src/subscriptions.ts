@@ -47,3 +47,20 @@ export interface CheckoutResult {
 export interface CancelSubscriptionResult {
   requested: true;
 }
+
+// ---------------------------------------------------------------------------
+// Escrita (CRUD administrativo de planos - apps/admin, FASE 11)
+// ---------------------------------------------------------------------------
+
+export interface CreateSubscriptionPlanRequest {
+  name: string;
+  description?: string;
+  priceCents: number;
+  currency?: string;
+  interval: 'month' | 'year';
+  trialDays?: number;
+  status?: PublishStatus;
+  gatewayPriceId?: string;
+}
+
+export type UpdateSubscriptionPlanRequest = Partial<CreateSubscriptionPlanRequest>;

@@ -1,12 +1,24 @@
-import { ConflictException, Injectable } from '@nestjs/common';
-import { UserStatus } from '@prisma/client';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, UserStatus } from '@prisma/client';
+import { paginationArgs, PaginatedResult, toPaginatedResult } from '../common/utils/pagination';
 import { PrismaService } from '../prisma/prisma.service';
+import { ListUsersQueryDto } from './dto/list-users-query.dto';
 
 const userWithRoles = {
   include: { userRoles: { include: { role: true } } },
 } as const;
 
 export type UserWithRoles = NonNullable<Awaited<ReturnType<UsersService['findByEmail']>>>;
+
+export interface AdminUserView {
+  id: string;
+  name: string;
+  email: string;
+  status: UserStatus;
+  roles: string[];
+  emailVerifiedAt: Date | null;
+  createdAt: Date;
+}
 
 interface CreateStudentInput {
   name: string;
@@ -24,6 +36,14 @@ export class UsersService {
 
   findById(id: string) {
     return this.prisma.user.findUnique({ where: { id }, ...userWithRoles });
+  }
+
+  async findByIdOrThrow(id: string): Promise<UserWithRoles> {
+    const user = await this.findById(id);
+    if (!user) {
+      throw new NotFoundException('Usuario nao encontrado.');
+    }
+    return user;
   }
 
   async createStudent(input: CreateStudentInput): Promise<UserWithRoles> {
@@ -67,7 +87,74 @@ export class UsersService {
     await this.prisma.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
   }
 
+  /** Listagem administrativa (painel admin/professor - FASE 11). */
+  async listAdmin(query: ListUsersQueryDto): Promise<PaginatedResult<AdminUserView>> {
+    const where: Prisma.UserWhereInput = {
+      status: query.status,
+      ...(query.role ? { userRoles: { some: { role: { name: query.role } } } } : {}),
+      ...(query.search
+        ? {
+            OR: [
+              { name: { contains: query.search, mode: 'insensitive' } },
+              { email: { contains: query.search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        ...userWithRoles,
+        ...paginationArgs(query.page, query.limit),
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return toPaginatedResult(items.map((user) => UsersService.toAdminView(user)), total, query.page, query.limit);
+  }
+
+  /** Substitui integralmente os papeis do usuario (ex.: promover a professor). */
+  async setRoles(userId: string, roleNames: string[]): Promise<UserWithRoles> {
+    await this.findByIdOrThrow(userId);
+
+    const uniqueNames = Array.from(new Set(roleNames));
+    const roles = await this.prisma.role.findMany({ where: { name: { in: uniqueNames } } });
+    if (roles.length !== uniqueNames.length) {
+      const found = new Set(roles.map((role) => role.name));
+      const missing = uniqueNames.filter((name) => !found.has(name));
+      throw new BadRequestException(`Papel(is) inexistente(s): ${missing.join(', ')}`);
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.userRole.deleteMany({ where: { userId } }),
+      this.prisma.userRole.createMany({ data: roles.map((role) => ({ userId, roleId: role.id })) }),
+    ]);
+
+    return this.findByIdOrThrow(userId);
+  }
+
+  /** Bloqueia/reativa um usuario (UserStatus.BLOCKED/ACTIVE). */
+  async setStatus(userId: string, status: UserStatus): Promise<UserWithRoles> {
+    await this.findByIdOrThrow(userId);
+    await this.prisma.user.update({ where: { id: userId }, data: { status } });
+    return this.findByIdOrThrow(userId);
+  }
+
   static toRoleNames(user: { userRoles: { role: { name: string } }[] }): string[] {
     return user.userRoles.map((userRole) => userRole.role.name);
+  }
+
+  static toAdminView(user: UserWithRoles): AdminUserView {
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      status: user.status,
+      roles: UsersService.toRoleNames(user),
+      emailVerifiedAt: user.emailVerifiedAt,
+      createdAt: user.createdAt,
+    };
   }
 }
