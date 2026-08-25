@@ -37,12 +37,10 @@ RUN npm ci
 FROM deps AS build
 ENV DATABASE_URL="postgresql://user:pass@localhost:5432/db"
 RUN npm run prisma:generate --workspace=apps/api
-RUN echo "--- DEBUG ---" \
- && pwd \
- && node -e "console.log('resolve @nestjs/common:', require.resolve('@nestjs/common'))" \
- && node -p "require('typescript').version" \
- && cat apps/api/node_modules/.bin/tsc 2>&1 | head -3 || true \
- && cd apps/api && pwd && node -e "console.log('resolve from apps/api:', require.resolve('@nestjs/common'))" \
+RUN echo "--- DEBUG: tsc -p tsconfig.json (base, mesmo do job lint-and-typecheck que passa) ---" \
+ && (npx tsc --noEmit -p apps/api/tsconfig.json && echo "BASE_TSCONFIG_OK" || echo "BASE_TSCONFIG_FAILED") \
+ && echo "--- DEBUG: tsc -p tsconfig.build.json (o que nest build usa) ---" \
+ && (npx tsc --noEmit -p apps/api/tsconfig.build.json && echo "BUILD_TSCONFIG_OK" || echo "BUILD_TSCONFIG_FAILED") \
  && echo "--- END DEBUG ---"
 RUN npm run build --workspace=apps/api
 RUN npm prune --omit=dev
