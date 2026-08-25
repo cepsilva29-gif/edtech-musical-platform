@@ -1162,6 +1162,35 @@ apps/api`) é um caminho conhecido por ter comportamento inconsistente entre ver
   se comporta "certo ou errado" quando executada de verdade (não lida/revisada) precisa ser
   executada de verdade assim que possível, e o resultado real corrigido, não assumido.
 
+## 61. CI falhava em todo job: `prisma migrate deploy` não gera o Prisma Client, só aplica migrations
+
+- **Decisão:** os três jobs que precisam do `@prisma/client` tipado (`lint-and-typecheck`,
+  `unit-tests`, `integration-tests`) ganharam um passo explícito
+  `npm run prisma:generate --workspace=apps/api` logo após `npm ci`.
+- **Motivo:** com a correção da decisão 60 (branch certo), o CI finalmente rodou de verdade — e
+  falhou nos três jobs com o mesmo padrão de erro: `Module '"@prisma/client"' has no exported
+member 'PublishStatus'` (e outros enums/tipos gerados pelo Prisma). Causa raiz: um `npm ci` limpo
+  não roda `prisma generate` automaticamente (não há `postinstall` configurado - decisão
+  deliberada, não descuido, para não conflitar com o estágio `deps` de `apps/api/Dockerfile`, que
+  só copia os `package.json` antes do `schema.prisma` existir no container). Localmente isso nunca
+  apareceu porque o Prisma Client já estava gerado em `node_modules/.prisma/client` de sessões de
+  trabalho anteriores nesta sandbox — só um ambiente com `npm ci` genuinamente limpo (como um
+  runner de CI) revela a falta do passo explícito. `npx prisma migrate deploy` (já presente no job
+  de integração) **não** substitui isso — ele só aplica migrations SQL, nunca gera o client
+  TypeScript.
+- **Alternativas consideradas:** adicionar `"postinstall": "prisma generate"` ao
+  `apps/api/package.json` (rejeitado nesta fase — geraria o client automaticamente em qualquer
+  `npm install`/`npm ci`, mas quebraria o estágio `deps` de `apps/api/Dockerfile`/
+  `apps/admin/Dockerfile`, que roda `npm ci` **antes** de copiar `apps/api/prisma/schema.prisma`
+  para dentro do container, exatamente para manter o cache de camada do Docker eficiente - ver
+  decisão 52/53; um passo explícito no CI é mais verboso, mas não exige reestruturar os
+  Dockerfiles, que já foram cuidadosamente projetados e não podem ser re-testados agora sem
+  Docker disponível nesta sandbox).
+- **Impacto futuro:** se o `postinstall` vier a ser adicionado no futuro, ajustar
+  `apps/api/Dockerfile`/`apps/admin/Dockerfile` para copiar `apps/api/prisma/schema.prisma` (só o
+  schema, não a pasta inteira) para dentro do estágio `deps` antes do `npm ci`, mantendo o cache de
+  camada eficiente.
+
 ---
 
 ## Compatibilidade verificada nesta fase
