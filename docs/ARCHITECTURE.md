@@ -1145,6 +1145,23 @@ apps/api`) é um caminho conhecido por ter comportamento inconsistente entre ver
 - **Impacto futuro:** repetir esta varredura sempre que uma nova rota administrativa/sensível for
   adicionada, não só no fim de um ciclo de fases.
 
+## 60. CI não disparou no primeiro push real: `on.push.branches` apontava para `main`, o repositório usa `master`
+
+- **Decisão:** `.github/workflows/ci.yml` passou a disparar em `push` para `master` (era `main`).
+- **Motivo:** a decisão 56 já registrava honestamente que o workflow nunca tinha sido executado de
+  verdade (sem remote GitHub nesta sandbox até então). Assim que o repositório foi criado de fato
+  (`gh repo create`) e o primeiro `git push` aconteceu, `gh run list` não mostrou nenhuma execução —
+  o branch padrão deste repositório é `master` (nome herdado do branch já existente localmente
+  desde a FASE 1), não `main` (o nome mais comum hoje em dia, usado sem verificar o branch real
+  deste projeto especificamente). É exatamente o tipo de erro que só aparece rodando de verdade,
+  não lendo o YAML - confirma o próprio aviso já deixado na decisão 56.
+- **Alternativas consideradas:** renomear o branch local/remoto de `master` para `main` (rejeitado —
+  mudaria o branch padrão de um repositório já criado e com histórico compartilhado, sem nenhum
+  benefício real sobre simplesmente corrigir o workflow para apontar para o branch que já existe).
+- **Impacto futuro:** nenhum — mas reforça, de novo, a lição da decisão 34/56: qualquer coisa que só
+  se comporta "certo ou errado" quando executada de verdade (não lida/revisada) precisa ser
+  executada de verdade assim que possível, e o resultado real corrigido, não assumido.
+
 ---
 
 ## Compatibilidade verificada nesta fase
