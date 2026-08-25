@@ -785,7 +785,7 @@ gateway_customer_id)` — mudança isolada, sem afetar `PaymentGateway`/`Subscri
   `apps/mobile/.eslintrc.cjs` da decisão 33 — herdado pelo `npm run lint` da raiz do monorepo, que
   ainda roda em ESLint 8).
 - **Motivo:** Next.js 16 exige ESLint 9 (flat config) para suas próprias regras (`eslint-config-
-  next`); a raiz do monorepo nunca migrou para ESLint 9 porque nenhum app antes de `apps/mobile`
+next`); a raiz do monorepo nunca migrou para ESLint 9 porque nenhum app antes de `apps/mobile`
   (FASE 10) precisava de suporte a JSX. Migrar a raiz inteira para ESLint 9 agora arriscaria quebrar
   o lint já funcionando de `apps/api`/`apps/mobile` sem necessidade real — mesmo raciocínio da
   decisão 5 ("tooling compartilhado, mas sem forçar upgrade sem motivo").
@@ -805,7 +805,7 @@ gateway_customer_id)` — mudança isolada, sem afetar `PaymentGateway`/`Subscri
 - **Motivo:** `docs/00-primeira-entrega.md` (seção 10) já previa "Player web (admin/preview) baseado
   em HLS.js/Video.js" — `<video>` nativo não decodifica HLS via MSE fora do Safari, e tanto o
   preview de aula (`GET /lessons/:id/playback`, decisão 25) quanto o de live (`GET
-  /live-sessions/:id/playback`, decisão 29/30) devolvem URLs HLS.
+/live-sessions/:id/playback`, decisão 29/30) devolvem URLs HLS.
 - **Alternativas consideradas:** Video.js (citado como alternativa no próprio prompt-mestre;
   rejeitado por trazer sua própria UI de player/CSS quando só o preview é necessário aqui — `hls.js`
   é só a camada MSE, reaproveitando o `<video>` nativo/estilizado com Tailwind).
@@ -871,6 +871,105 @@ gateway_customer_id)` — mudança isolada, sem afetar `PaymentGateway`/`Subscri
 - **Impacto futuro:** nenhum — mas reforça a lição já registrada na decisão 34 ("ler o `.d.ts`/
   comportamento real antes de assumir") — aqui o achado só apareceu porque a tabela de rotas do
   `next build` foi de fato lida e conferida, não só "build passou sem erro".
+
+## 47. FASE 12 (Testes) tem três camadas distintas, com fronteiras de acesso diferentes de propósito
+
+- **Decisão:** três suítes novas, cada uma vendo a API de um jeito diferente: (1)
+  `apps/api/test/*.e2e-spec.ts` — bootstrap completo do `AppModule` em processo
+  (`@nestjs/testing`), acesso direto ao `PrismaService`, contra um Postgres real; (2) `tests/e2e/`
+  (raiz do monorepo) — só HTTP (`fetch` nativo) contra uma instância de `apps/api` já rodando, sem
+  importar nada de `apps/api/src`; (3) os 57 testes unitários já existentes desde as FASES 3-9,
+  inalterados. A cobertura "unit" da estratégia de testes (seção 14 do prompt-mestre) já estava
+  substancialmente feita antes da FASE 12 (RBAC, visibilidade de catálogo, entitlement, gateways/
+  providers fake, transições de status) — esta fase deliberadamente focou nas duas camadas que
+  faltavam (integration/e2e), não em expandir a unitária, que já cobria as regras de negócio puras
+  citadas na própria seção 14.
+- **Motivo:** a seção 14 do prompt-mestre já pede exatamente essa separação (unit/integration/e2e);
+  a diferença de acesso entre (1) e (2) é deliberada, não redundância — (1) testa a lógica de
+  negócio com o mínimo de camadas no caminho (rápido, acesso direto ao banco para preparar cenários
+  e verificar efeitos colaterais como no teste de idempotência de webhook), enquanto (2) garante que
+  existe pelo menos uma suíte que não sabe nada da implementação interna, do mesmo jeito que
+  `apps/admin`/`apps/mobile` também só enxergam a API pela fronteira HTTP pública — um bug na
+  fronteira HTTP (serialização, envelope de resposta, prefixo de rota) só apareceria em (2), nunca
+  em (1), que usa o app Nest em memória.
+- **Alternativas consideradas:** uma única camada de integração cobrindo tudo (rejeitado — perderia
+  o valor de ter uma suíte verdadeiramente "cega" à implementação, que é o que torna (2) diferente
+  de só rodar (1) com mais casos); usar `testcontainers` para subir Postgres automaticamente
+  (rejeitado nesta fase — exigiria Docker rodando no ambiente de CI/dev, e esta sandbox não tem
+  Docker disponível para validar essa escolha; documentado como possível evolução futura, não como
+  decisão tomada às cegas).
+- **Impacto futuro:** se o CI ganhar Docker disponível (FASE 13), considerar `testcontainers` para
+  automatizar o Postgres descartável de (1)/(2) em vez de exigir um `docker run` manual documentado
+  no README.
+
+## 48. `resetDatabase()` recusa truncar um banco cujo nome não termine em `_test`
+
+- **Decisão:** `apps/api/test/utils/reset-database.ts` valida `DATABASE_URL` com uma regex antes de
+  rodar `TRUNCATE ... CASCADE` — se o nome do banco não terminar em `_test`, lança um erro e não
+  executa nada.
+- **Motivo:** os testes de integração truncam **todas** as tabelas entre arquivos (`beforeEach`) —
+  se alguém rodar `npm run test:integration` sem configurar `.env.test.local` (ou configurá-lo
+  apontando por engano para o banco de desenvolvimento), o dano seria irreversível e silencioso
+  (nenhum erro até o teste realmente truncar tudo). Uma guarda de nomenclatura barata (checar o nome
+  do banco) transforma um acidente catastrófico em um erro claro e imediato na primeira chamada.
+- **Alternativas consideradas:** confiar só na documentação/README para o desenvolvedor configurar
+  certo (rejeitado — a mesma categoria de erro humano que motivou, por exemplo, a decisão 23 sobre
+  `PORT` nunca convertido de string: proteção em código é mais confiável que instrução escrita);
+  usar uma variável de ambiente dedicada tipo `ALLOW_TEST_DB_RESET=true` em vez de checar o nome
+  (rejeitado — exigiria mais um passo de configuração manual, e ainda seria burlável por engano;
+  checar o nome do banco em si é uma convenção mais dura de quebrar sem querer).
+- **Impacto futuro:** nenhum — a regra é auto-contida no helper, não vaza para nenhum outro código.
+
+## 49. `tests/e2e` vira workspace novo (`tests/*` no glob raiz), não um script solto
+
+- **Decisão:** `tests/e2e/` ganhou `package.json`/`tsconfig.json` próprios e entrou no glob
+  `workspaces` da raiz (`"tests/*"`, ao lado de `apps/*`/`packages/*`), com `shared` como
+  dependência de workspace normal.
+- **Motivo:** o teste E2E cross-app precisa dos tipos de `packages/shared` para ficar tipado contra
+  o contrato real da API (mesmo raciocínio de todo app cliente do monorepo); tratá-lo como workspace
+  member (em vez de, por exemplo, um script solto em `scripts/`) mantém consistência com o resto do
+  monorepo — mesmo `tsconfig.base.json`, mesmo ESLint/Prettier raiz, mesma forma de rodar
+  (`npm run test --workspace=tests/e2e`).
+- **Alternativas consideradas:** colocar o teste E2E dentro de `apps/api/test/` também (rejeitado —
+  misturaria as duas fronteiras de acesso diferentes da decisão 47 no mesmo diretório/tsconfig,
+  tornando fácil importar `src/` por engano num teste que deveria ser cego à implementação).
+- **Impacto futuro:** nenhum — a pasta já existia como placeholder desde a FASE 1
+  (`tests/e2e/README.md`), só ganhou conteúdo real agora, conforme sempre planejado no roadmap.
+
+## 50. Seed ganhou `videoProvider`/`videoRef` nas aulas de exemplo — gap real achado ao escrever o E2E
+
+- **Decisão:** as duas aulas criadas por `apps/api/prisma/seed.ts` agora têm `videoProvider: 'fake'`
+  e um `videoRef` próprio (`seed-aula-1`/`seed-aula-2`).
+- **Motivo:** o próprio comentário do seed já dizia que o curso de exemplo existia para "exercitar
+  catálogo e progresso fim a fim" — mas sem `videoRef`, `GET /lessons/:id/playback` sempre
+  retornava 409 (`ConflictException`, "aula ainda não tem vídeo associado"), tornando o passo
+  "reprodução" dos 8 fluxos (seção 14) impossível de exercitar contra os dados do seed. Achado real
+  ao escrever `tests/e2e/src/full-lifecycle.spec.ts` (decisão 49) — mesma categoria de correção
+  orgânica de gap já praticada em toda fase anterior (PORT, `gatewayCustomerId`, `stream_ref`
+  único, endpoints administrativos de usuários da decisão 40).
+- **Alternativas consideradas:** o teste E2E criar sua própria aula com vídeo via API antes de
+  testar o passo 5 (rejeitado — exigiria privilégio de admin/professor, e o teste E2E já usa contas
+  seedadas para o catálogo de propósito, ver decisão 49; ajustar o seed é mais simples e beneficia
+  qualquer pessoa explorando a API manualmente, não só o teste).
+- **Impacto futuro:** nenhum.
+
+## 51. Testes de integração fazem `assert`/setup passando pelo `UsersService` real, não Prisma cru
+
+- **Decisão:** `apps/api/test/utils/fixtures.ts` promove um usuário a admin/professor chamando
+  `app.get(UsersService).setRoles(...)` (o mesmo código de produção que o endpoint
+  `PATCH /users/:id/roles` da decisão 40 usa), não escrevendo direto na tabela `user_roles` via
+  Prisma.
+- **Motivo:** usar o serviço real para arranjar o cenário de teste (em vez de manipular o banco
+  cru) garante que o teste continua válido se a lógica de `setRoles` mudar (ex. passar a exigir uma
+  auditoria, ou a invalidar um cache) — o setup do teste segue o mesmo caminho de código que
+  qualquer chamador real usaria, só pulando a camada HTTP (que não é o que este teste quer isolar,
+  ao contrário do que ele testa de verdade: RBAC, visibilidade, entitlement).
+- **Alternativas consideradas:** criar o usuário já com a role certa via `prisma.user.create` com
+  `userRoles: { create: ... }` direto (rejeitado — mais rápido, mas duplica silenciosamente a regra
+  de "como promover alguém", que já existe em `UsersService`; se a regra mudar, o teste continuaria
+  passando com uma alegria falsa).
+- **Impacto futuro:** nenhum — o padrão deve ser seguido por qualquer teste de integração futuro que
+  precise de um usuário com papéis não-`student`.
 
 ---
 

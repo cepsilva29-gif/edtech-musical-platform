@@ -308,9 +308,44 @@ catálogo, FASE 4, incluindo `isOwnerOrAdmin` reaproveitada por lives — decis�
 `AccessControlService` (regra de entitlement e `assertEntitled`, FASE 5/7), `env.validation`
 (coerção/validação de variáveis de ambiente), `date-interval.util` e `FakePaymentGateway` (FASE 6),
 `FakeVideoProvider` (FASE 7), `live-status-transition.util` e `FakeLiveProvider` (FASE 9), mais o
-smoke test de DI do `AppModule`. Testes de integração para os fluxos de auth/catálogo/progresso/
-pagamentos/playback/lives (contra um Postgres real) ficam para a FASE 12, conforme o roadmap do
-prompt-mestre.
+smoke test de DI do `AppModule`.
+
+## Testes de integração — FASE 12
+
+`test/*.e2e-spec.ts` cobre os fluxos de auth, catálogo (visibilidade/propriedade) e assinaturas/
+progresso/playback contra um **Postgres real** (não mockado) — bootstrap completo do `AppModule`
+via `@nestjs/testing`, requisições HTTP reais via `supertest`, banco truncado e os papéis
+`student`/`teacher`/`admin` recriados antes de cada arquivo de teste (`test/utils/reset-database.ts`).
+
+```bash
+cp .env.test.example .env.test.local   # ajuste DATABASE_URL para um banco DESCARTAVEL
+# suba um Postgres so para isto, ex.:
+docker run --rm -p 5433:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=edtech_musical_test postgres:16
+DATABASE_URL=postgresql://postgres:postgres@localhost:5433/edtech_musical_test?schema=public npx prisma migrate deploy
+npm run test:integration
+```
+
+**Nunca** aponte `.env.test.local` para o mesmo banco do `.env` de desenvolvimento — os testes
+truncam todas as tabelas entre arquivos. `resetDatabase()` se recusa a rodar se o nome do banco não
+terminar em `_test`, exatamente para tornar esse erro difícil de cometer por acidente (ver decisão
+correspondente em `docs/ARCHITECTURE.md`, FASE 12).
+
+Cobertura: registro/login/refresh (com rotação)/logout/RBAC (`auth.e2e-spec.ts`); visibilidade e
+propriedade do catálogo — DRAFT invisível a aluno, professor não-dono bloqueado, publicação em
+cadeia (`catalog-access.e2e-spec.ts`); checkout com aprovação instantânea do `FakePaymentGateway`,
+cancelamento, idempotência de webhook por `(gateway, eventId)` (`subscriptions.e2e-spec.ts`); gate
+de entitlement em progresso/playback, monotonicidade do progresso, conclusão automática aos 90%
+assistidos (`progress-playback.e2e-spec.ts`).
+
+O teste E2E cross-app (os 8 fluxos completos do aluno, do cadastro ao cancelamento, rodando por HTTP
+contra a API real como um cliente de verdade faria) fica em `tests/e2e/` na raiz do monorepo — ver
+`tests/e2e/README.md`.
+
+**O que foi verificado nesta sandbox:** `tsc --noEmit` limpo (incluindo `test/**/*.ts`, adicionado
+ao `include` de `tsconfig.json` — `tsconfig.build.json` continua excluindo `test/` do build de
+produção), `eslint`/`prettier` limpos. **Não foi possível rodar de fato** — esta sandbox não tem
+acesso a Postgres nem Docker. Rode os comandos acima no seu ambiente antes de seguir para a próxima
+fase.
 
 ## Estrutura atual
 
@@ -342,9 +377,9 @@ src/
   config/              validacao de env
   prisma/              PrismaService/PrismaModule (global)
 prisma/                schema.prisma, migrations, seed
+test/                  testes de integracao contra Postgres real (FASE 12) - ver secao acima
 ```
 
 Ainda faltam (fases seguintes): materiais protegidos com URL assinada de verdade
 (`LessonMaterialsService` ainda expõe só `storageKey`, sem `StorageProvider`), `notifications`,
-`admin`, `apps/mobile`/`apps/admin` (onde o player/live embutidos de fato moram — decisões 26/30),
 adapters reais de `PaymentGateway`/`VideoProvider`/`LiveProvider`.

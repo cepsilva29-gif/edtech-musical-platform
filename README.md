@@ -27,7 +27,7 @@ infra/
   docker/       Dockerfiles e docker-compose (FASE 13+)
   nginx/        Reverse proxy de produção (FASE 13+)
 docs/           Documentação técnica e de arquitetura
-tests/e2e/      Testes ponta-a-ponta cross-app (FASE 12+)
+tests/e2e/      Testes ponta-a-ponta cross-app (FASE 12)
 ```
 
 Cada pasta ainda vazia tem um `README.md` explicando o que será criado nela e em qual fase — não
@@ -39,7 +39,7 @@ há nenhum arquivo "fictício" além dessas explicações.
   v24.19.0, compatível nesta fase)
 - npm `>=10`
 
-## Como executar (estado atual — FASE 11)
+## Como executar (estado atual — FASE 12)
 
 ```bash
 npm install
@@ -81,6 +81,11 @@ Motores de metrônomo/afinador (sem servidor, sem banco — ver `packages/music-
 npm test --workspace=music-tools
 ```
 
+Testes de integração (contra Postgres real — ver `apps/api/README.md`, seção "Testes de
+integração") e o teste E2E cross-app dos 8 fluxos principais (contra a API rodando — ver
+`tests/e2e/README.md`) exigem um banco descartável e não foram executados nesta sandbox (sem acesso
+a Postgres/Docker aqui); ambos os READMEs documentam exatamente como rodá-los.
+
 ## Roadmap
 
 | Fase | Escopo                         | Status                      |
@@ -95,7 +100,7 @@ npm test --workspace=music-tools
 | 8    | Metrônomo e afinador           | ✅ concluída                |
 | 9    | Lives                          | ✅ concluída                |
 | 10   | Aplicativo mobile              | ✅ concluída                |
-| 11   | Painel administrativo          | ✅ concluída (esta entrega) |
-| 12   | Testes                         | aguardando autorização      |
-| 13   | Docker e produção              | —                           |
+| 11   | Painel administrativo          | ✅ concluída                |
+| 12   | Testes                         | ✅ concluída (esta entrega) |
+| 13   | Docker e produção              | aguardando autorização      |
 | 14   | Auditoria final                | —                           |

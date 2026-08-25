@@ -15,7 +15,10 @@ export class ListUsersQueryDto extends PaginationQueryDto {
   @MaxLength(40)
   role?: string;
 
-  @ApiProperty({ required: false, description: 'Busca por nome/e-mail (contains, case-insensitive).' })
+  @ApiProperty({
+    required: false,
+    description: 'Busca por nome/e-mail (contains, case-insensitive).',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(160)

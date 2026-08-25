@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, UserStatus } from '@prisma/client';
 import { paginationArgs, PaginatedResult, toPaginatedResult } from '../common/utils/pagination';
 import { PrismaService } from '../prisma/prisma.service';
@@ -112,7 +117,12 @@ export class UsersService {
       this.prisma.user.count({ where }),
     ]);
 
-    return toPaginatedResult(items.map((user) => UsersService.toAdminView(user)), total, query.page, query.limit);
+    return toPaginatedResult(
+      items.map((user) => UsersService.toAdminView(user)),
+      total,
+      query.page,
+      query.limit,
+    );
   }
 
   /** Substitui integralmente os papeis do usuario (ex.: promover a professor). */

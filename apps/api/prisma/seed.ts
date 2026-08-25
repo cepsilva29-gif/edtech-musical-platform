@@ -134,9 +134,22 @@ async function main() {
     },
   });
 
+  // videoProvider/videoRef preenchidos (FakeVideoProvider aceita qualquer referencia) para que o
+  // fluxo de reproducao (GET /lessons/:id/playback) tambem seja exercitavel fim a fim a partir do
+  // seed, sem precisar de uma aula criada manualmente - achado real ao escrever tests/e2e (FASE 12).
   const lessons = [
-    { id: '00000000-0000-0000-0000-000000000004', title: 'Aula 1 - Postura e afinação', order: 0 },
-    { id: '00000000-0000-0000-0000-000000000005', title: 'Aula 2 - Primeiros acordes', order: 1 },
+    {
+      id: '00000000-0000-0000-0000-000000000004',
+      title: 'Aula 1 - Postura e afinação',
+      order: 0,
+      videoRef: 'seed-aula-1',
+    },
+    {
+      id: '00000000-0000-0000-0000-000000000005',
+      title: 'Aula 2 - Primeiros acordes',
+      order: 1,
+      videoRef: 'seed-aula-2',
+    },
   ];
   for (const lesson of lessons) {
     await prisma.lesson.upsert({
@@ -146,6 +159,8 @@ async function main() {
         id: lesson.id,
         moduleId: courseModule.id,
         title: lesson.title,
+        videoProvider: 'fake',
+        videoRef: lesson.videoRef,
         durationSeconds: 600,
         status: PublishStatus.PUBLISHED,
         order: lesson.order,

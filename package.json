@@ -5,7 +5,8 @@
   "description": "Plataforma EdTech musical multi-instrumentos (monorepo)",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "tests/*"
   ],
   "engines": {
     "node": ">=20 <25",
