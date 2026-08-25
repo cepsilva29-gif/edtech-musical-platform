@@ -153,6 +153,20 @@ async function main() {
     });
   }
 
+  // Live de exemplo agendada, para exercitar live-sessions (FASE 9) fim a fim.
+  const liveSession = await prisma.liveSession.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000006' },
+    update: {},
+    create: {
+      id: '00000000-0000-0000-0000-000000000006',
+      instrumentId: cordas.id,
+      teacherId: teacher.id,
+      title: '[DEV] Live de exemplo - tira-dúvidas',
+      description: 'Live de exemplo criada pelo seed.',
+      scheduledAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+    },
+  });
+
   console.log('Seed concluído.');
   console.log('Usuários de DESENVOLVIMENTO criados (NÃO usar em homologação/produção):');
   for (const testUser of testUsers) {
@@ -162,6 +176,7 @@ async function main() {
     `Assinatura ACTIVE de desenvolvimento atribuída a ${student.id} (aluno.dev@example.com) até ${periodEnd.toISOString()}.`,
   );
   console.log(`Curso de exemplo publicado: /courses/slug/${course.slug}`);
+  console.log(`Live de exemplo agendada: /live-sessions/${liveSession.id}`);
 }
 
 main()

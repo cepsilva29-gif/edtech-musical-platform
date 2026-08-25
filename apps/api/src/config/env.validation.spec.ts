@@ -21,12 +21,20 @@ describe('validate (env.validation)', () => {
     expect(config.PAYMENT_PROVIDER).toBe('fake');
     expect(config.VIDEO_PROVIDER).toBe('fake');
     expect(config.VIDEO_PLAYBACK_URL_TTL_SECONDS).toBe(600);
+    expect(config.LIVE_PROVIDER).toBe('fake');
+    expect(config.LIVE_RECORDING_URL_TTL_SECONDS).toBe(600);
   });
 
   it('coerces VIDEO_PLAYBACK_URL_TTL_SECONDS from string to number, same as PORT', () => {
     const config = validate({ ...REQUIRED, VIDEO_PLAYBACK_URL_TTL_SECONDS: '120' });
     expect(config.VIDEO_PLAYBACK_URL_TTL_SECONDS).toBe(120);
     expect(typeof config.VIDEO_PLAYBACK_URL_TTL_SECONDS).toBe('number');
+  });
+
+  it('coerces LIVE_RECORDING_URL_TTL_SECONDS from string to number, same as PORT', () => {
+    const config = validate({ ...REQUIRED, LIVE_RECORDING_URL_TTL_SECONDS: '90' });
+    expect(config.LIVE_RECORDING_URL_TTL_SECONDS).toBe(90);
+    expect(typeof config.LIVE_RECORDING_URL_TTL_SECONDS).toBe('number');
   });
 
   it('rejects a PORT outside the valid TCP port range', () => {

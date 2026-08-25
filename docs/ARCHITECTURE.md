@@ -508,6 +508,66 @@ gateway_customer_id)` — mudança isolada, sem afetar `PaymentGateway`/`Subscri
   `matchNearestNote()` já aceita um `tuning` alternativo como parâmetro — não precisa mudar a
   assinatura.
 
+## 28. `isOwnerOrAdmin` — renomeado de `canManageCourse`, reaproveitado para lives
+
+- **Decisão:** `canManageCourse(user, course)` foi renomeada para `isOwnerOrAdmin(user, resource)`
+  em `catalog-visibility.util.ts` — a lógica ("admin sempre; senão, só quem é `teacherId` dono") é
+  idêntica para `Course` e, agora, para `LiveSession` (FASE 9), então em vez de duplicar a função
+  com outro nome, o `LiveSessionsService` importa e usa a mesma. Comportamento idêntico, só o nome
+  deixou de sugerir que é exclusiva de curso.
+- **Motivo:** mesmo raciocínio da decisão 24 (regra dos 3/DRY) aplicado a uma função já existente
+  em vez de a um novo método — reutilizar uma função já testada é preferível a escrever
+  `isOwnerOrAdmin` do zero em `live-sessions`, e manter o nome antigo (`canManageCourse`) num lugar
+  usado por dois domínios diferentes seria confuso para quem ler o código depois.
+- **Alternativas consideradas:** copiar a função para dentro de `live-sessions` com outro nome
+  (rejeitado — duplicação direta do que a decisão 24 já identificou como problema); manter o nome
+  `canManageCourse` e só documentar que também serve para lives (rejeitado — nome enganoso é pior
+  que uma renomeação de baixo risco, já que a função só tem 3 usos no código inteiro).
+- **Impacto futuro:** qualquer novo recurso com o mesmo formato de propriedade (`{ teacherId }`)
+  reaproveita `isOwnerOrAdmin` diretamente.
+
+## 29. `live_sessions.stream_ref` vira `@unique` (nova migration) — não previsto na FASE 2
+
+- **Necessidade:** o webhook de gravação (`POST /live-sessions/webhook/:provider`) precisa
+  localizar a live por `streamRef` para gravar o `recordingRef` — e `prisma.liveSession.update()`
+  exige um campo único no `where`. O schema da FASE 2 não modelou `stream_ref` como único porque a
+  estratégia de webhook de live ainda não tinha sido implementada (mesma situação da decisão 22
+  para `users.gateway_customer_id`).
+- **Alteração:** `LiveSession.streamRef String? @unique`. Um valor `NULL` (live que nunca foi ao ar)
+  não conflita com outro `NULL` — unicidade em Postgres ignora `NULL`s, então múltiplas lives
+  `SCHEDULED` sem stream continuam coexistindo sem violar a constraint.
+- **Migration:** `prisma/migrations/20260824190000_live_session_stream_ref_unique/`.
+- **Impacto futuro:** nenhum — é exatamente o identificador que o provedor real (Mux/AWS IVS/
+  YouTube Live) já garante ser globalmente único; a constraint só formaliza no banco uma garantia
+  que já existia na prática.
+
+## 30. Transição de status da live só por webhook para a gravação, não para o estado da live
+
+- **Decisão:** `SCHEDULED → LIVE → FINISHED` é decidido **sincronamente** pela ação do professor/
+  admin (`POST /live-sessions/:id/go-live` e `.../end`, validados por
+  `assertValidLiveStatusTransition` — máquina de estados pura e testada isoladamente). Diferente da
+  FASE 6 (onde nem o checkout síncrono pode confirmar uma assinatura), aqui a ação de "comecei a
+  transmitir"/"terminei de transmitir" é uma decisão legítima e imediata de quem está no controle
+  da live — não há necessidade de esperar confirmação externa para isso. O que **é** assíncrono e
+  só pode vir por webhook é a gravação em si (`recordingRef`) — o processamento do vídeo pós-live
+  leva tempo no provedor, então `endLive()` só encerra a live; o `POST /live-sessions/webhook/:provider`
+  (mesmo padrão de idempotência/assinatura de `PaymentsService.processWebhookEvent`, decisão 21) é
+  quem vincula `recordingRef` quando o provedor terminar de processar.
+- **Motivo:** distinguir "o que só o dono da live pode decidir, na hora" (ir ao vivo, encerrar) de
+  "o que só o provedor externo sabe, depois de um tempo" (a gravação ficou pronta) — aplicando o
+  mesmo princípio que orientou a decisão 21 (webhook como fonte de verdade), mas reconhecendo que
+  nem toda transição de estado tem a mesma natureza: dinheiro/assinatura exige confirmação externa
+  por definição (o servidor não pode saber se o pagamento realmente aconteceu sem o gateway dizer);
+  já a "duração de uma transmissão ao vivo" é uma decisão local e imediata do próprio usuário.
+- **Alternativas consideradas:** também esperar webhook para confirmar `LIVE`/`FINISHED`
+  (rejeitado — não há nada para o provedor "confirmar" aqui que o backend já não saiba com certeza
+  a partir da própria chamada da API; adicionaria latência e complexidade sem ganho de correção);
+  não ter máquina de estados nenhuma, aceitando qualquer `PATCH` de status (rejeitado — abriria
+  brecha para pular etapas, ex. marcar `FINISHED` sem nunca ter passado por `LIVE`).
+- **Impacto futuro:** nenhum — quando um provedor real substituir o `FakeLiveProvider`, o contrato
+  não muda: `endLiveStream()` continua sendo chamado de forma síncrona pela ação do professor, e
+  `processRecordingWebhook()` continua sendo o único ponto que grava `recordingRef`.
+
 ---
 
 ## Compatibilidade verificada nesta fase

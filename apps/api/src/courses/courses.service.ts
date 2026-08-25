@@ -7,9 +7,9 @@ import {
 import { Course, Instrument, Prisma, PublishStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.interface';
 import {
-  canManageCourse,
   isAdmin,
   isCoursePublished,
+  isOwnerOrAdmin,
 } from '../common/utils/catalog-visibility.util';
 import { paginationArgs, PaginatedResult, toPaginatedResult } from '../common/utils/pagination';
 import { slugify } from '../common/utils/slugify';
@@ -142,7 +142,7 @@ export class CoursesService {
   }
 
   canManage(user: AuthenticatedUser, course: { teacherId: string | null }): boolean {
-    return canManageCourse(user, course);
+    return isOwnerOrAdmin(user, course);
   }
 
   assertViewable(user: AuthenticatedUser, course: CourseWithInstrument): CourseWithInstrument {

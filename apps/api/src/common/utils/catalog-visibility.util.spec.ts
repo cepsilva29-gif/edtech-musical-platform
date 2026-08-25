@@ -1,7 +1,7 @@
 import { PublishStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '../types/authenticated-user.interface';
 import {
-  canManageCourse,
+  isOwnerOrAdmin,
   isCoursePublished,
   isLessonPublished,
   isModulePublished,
@@ -24,21 +24,21 @@ const student: AuthenticatedUser = {
   roles: ['student'],
 };
 
-describe('canManageCourse', () => {
+describe('isOwnerOrAdmin', () => {
   it('allows admin regardless of ownership', () => {
-    expect(canManageCourse(admin, { teacherId: teacherOwner.id })).toBe(true);
+    expect(isOwnerOrAdmin(admin, { teacherId: teacherOwner.id })).toBe(true);
   });
 
   it('allows the owning teacher', () => {
-    expect(canManageCourse(teacherOwner, { teacherId: teacherOwner.id })).toBe(true);
+    expect(isOwnerOrAdmin(teacherOwner, { teacherId: teacherOwner.id })).toBe(true);
   });
 
   it('denies a teacher who does not own the course', () => {
-    expect(canManageCourse(otherTeacher, { teacherId: teacherOwner.id })).toBe(false);
+    expect(isOwnerOrAdmin(otherTeacher, { teacherId: teacherOwner.id })).toBe(false);
   });
 
   it('denies a student', () => {
-    expect(canManageCourse(student, { teacherId: teacherOwner.id })).toBe(false);
+    expect(isOwnerOrAdmin(student, { teacherId: teacherOwner.id })).toBe(false);
   });
 });
 

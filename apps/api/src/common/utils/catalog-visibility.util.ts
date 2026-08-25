@@ -3,9 +3,10 @@ import type { AuthenticatedUser } from '../types/authenticated-user.interface';
 
 /**
  * Regras de visibilidade e propriedade do catalogo (instrumentos -> cursos -> modulos -> aulas
- * -> materiais). Centralizadas aqui para que cada nivel da hierarquia aplique exatamente a mesma
- * regra: admin ve tudo; o professor dono do curso ve o proprio conteudo em qualquer status; todo
- * o resto (aluno, outro professor) so ve a cadeia inteira publicada.
+ * -> materiais) e de qualquer outro recurso com o mesmo formato de propriedade (ex. live_sessions,
+ * FASE 9). Centralizadas aqui para que cada recurso aplique exatamente a mesma regra: admin ve
+ * tudo; o professor dono do recurso ve/gerencia em qualquer status; todo o resto (aluno, outro
+ * professor) so ve a cadeia inteira publicada.
  */
 
 export function isAdmin(user: AuthenticatedUser): boolean {
@@ -16,11 +17,12 @@ export function isTeacher(user: AuthenticatedUser): boolean {
   return user.roles.includes('teacher');
 }
 
-export function canManageCourse(
+/** admin sempre; senao, so quem e o `teacherId` dono do recurso (curso, live session, etc.). */
+export function isOwnerOrAdmin(
   user: AuthenticatedUser,
-  course: { teacherId: string | null },
+  resource: { teacherId: string | null },
 ): boolean {
-  return isAdmin(user) || course.teacherId === user.id;
+  return isAdmin(user) || resource.teacherId === user.id;
 }
 
 export function isInstrumentPublished(instrument: { status: PublishStatus }): boolean {

@@ -39,7 +39,7 @@ há nenhum arquivo "fictício" além dessas explicações.
   v24.19.0, compatível nesta fase)
 - npm `>=10`
 
-## Como executar (estado atual — FASE 8)
+## Como executar (estado atual — FASE 9)
 
 ```bash
 npm install
@@ -48,8 +48,8 @@ npm run format:check
 ```
 
 API (banco de dados + backend/autenticação + catálogo + controle de acesso/progresso +
-assinaturas/pagamentos + player de vídeo) — ver `apps/api/README.md` para o passo a passo completo,
-endpoints e limitações verificadas:
+assinaturas/pagamentos + player de vídeo + lives) — ver `apps/api/README.md` para o passo a passo
+completo, endpoints e limitações verificadas:
 
 ```bash
 cd apps/api
@@ -76,9 +76,9 @@ npm test --workspace=music-tools
 | 5    | Controle de acesso e progresso | ✅ concluída                |
 | 6    | Assinaturas e pagamentos       | ✅ concluída                |
 | 7    | Player de vídeo                | ✅ concluída                |
-| 8    | Metrônomo e afinador           | ✅ concluída (esta entrega) |
-| 9    | Lives                          | aguardando autorização      |
-| 10   | Aplicativo mobile              | —                           |
+| 8    | Metrônomo e afinador           | ✅ concluída                |
+| 9    | Lives                          | ✅ concluída (esta entrega) |
+| 10   | Aplicativo mobile              | aguardando autorização      |
 | 11   | Painel administrativo          | —                           |
 | 12   | Testes                         | —                           |
 | 13   | Docker e produção              | —                           |

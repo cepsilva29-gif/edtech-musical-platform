@@ -62,6 +62,20 @@ class EnvironmentVariables {
   @Min(1)
   @IsOptional()
   VIDEO_PLAYBACK_URL_TTL_SECONDS = 600;
+
+  @IsString()
+  @IsOptional()
+  LIVE_PROVIDER = 'fake';
+
+  @IsString()
+  @IsOptional()
+  FAKE_LIVE_PROVIDER_SECRET = 'dev-fake-live-secret';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  LIVE_RECORDING_URL_TTL_SECONDS = 600;
 }
 
 export function validate(config: Record<string, unknown>): EnvironmentVariables {

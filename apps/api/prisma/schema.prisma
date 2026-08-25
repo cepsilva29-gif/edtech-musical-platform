@@ -314,7 +314,7 @@ model LiveSession {
   scheduledAt    DateTime   @map("scheduled_at")
   status         LiveStatus @default(SCHEDULED)
   streamProvider String?    @map("stream_provider")
-  streamRef      String?    @map("stream_ref")
+  streamRef      String?    @unique @map("stream_ref")
   playbackUrl    String?    @map("playback_url")
   recordingRef   String?    @map("recording_ref")
   createdAt      DateTime   @default(now()) @map("created_at")

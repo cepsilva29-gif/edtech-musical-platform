@@ -16,6 +16,8 @@ import { HealthModule } from './health/health.module';
 import { InstrumentsModule } from './instruments/instruments.module';
 import { LessonMaterialsModule } from './lesson-materials/lesson-materials.module';
 import { LessonsModule } from './lessons/lessons.module';
+import { LiveProviderModule } from './live-provider/live-provider.module';
+import { LiveSessionsModule } from './live-sessions/live-sessions.module';
 import { MailModule } from './mail/mail.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PlaybackModule } from './playback/playback.module';
@@ -58,6 +60,8 @@ import { UsersModule } from './users/users.module';
     PaymentsModule,
     SubscriptionsModule,
     PlaybackModule,
+    LiveProviderModule,
+    LiveSessionsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
