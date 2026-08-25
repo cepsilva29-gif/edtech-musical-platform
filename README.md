@@ -18,9 +18,9 @@ player, metrônomo, afinador, segurança, testes, deploy) está em:
 apps/
   api/          Backend NestJS + TypeScript (FASE 3+)
   admin/        Painel administrativo Next.js (FASE 11+)
-  mobile/       App do aluno React Native/Expo (FASE 10+)
+  mobile/       App do aluno React Native/Expo (FASE 10)
 packages/
-  shared/       Tipos/DTOs compartilhados entre api/admin/mobile
+  shared/       Tipos/DTOs compartilhados entre api/admin/mobile (populado na FASE 10)
   config/       Schemas de validação de variáveis de ambiente
   music-tools/  Motores de metrônomo e afinador — estado/algoritmo puros (FASE 8)
 infra/
@@ -39,7 +39,7 @@ há nenhum arquivo "fictício" além dessas explicações.
   v24.19.0, compatível nesta fase)
 - npm `>=10`
 
-## Como executar (estado atual — FASE 9)
+## Como executar (estado atual — FASE 10)
 
 ```bash
 npm install
@@ -57,6 +57,14 @@ cp .env.example .env          # ajuste DATABASE_URL e troque os segredos JWT_*
 npm run prisma:migrate:dev
 npm run prisma:seed
 npm run start:dev             # http://localhost:3000 (Swagger em /docs)
+```
+
+App do aluno (React Native + Expo — aponte para a API acima; ver `apps/mobile/README.md`):
+
+```bash
+cd apps/mobile
+cp .env.example .env          # ajuste EXPO_PUBLIC_API_URL se a API nao estiver em localhost:3000
+npm start
 ```
 
 Motores de metrônomo/afinador (sem servidor, sem banco — ver `packages/music-tools/README.md`):
@@ -77,9 +85,9 @@ npm test --workspace=music-tools
 | 6    | Assinaturas e pagamentos       | ✅ concluída                |
 | 7    | Player de vídeo                | ✅ concluída                |
 | 8    | Metrônomo e afinador           | ✅ concluída                |
-| 9    | Lives                          | ✅ concluída (esta entrega) |
-| 10   | Aplicativo mobile              | aguardando autorização      |
-| 11   | Painel administrativo          | —                           |
+| 9    | Lives                          | ✅ concluída                |
+| 10   | Aplicativo mobile              | ✅ concluída (esta entrega) |
+| 11   | Painel administrativo          | aguardando autorização      |
 | 12   | Testes                         | —                           |
 | 13   | Docker e produção              | —                           |
 | 14   | Auditoria final                | —                           |

@@ -1,0 +1,49 @@
+{
+  "name": "mobile",
+  "version": "1.0.0",
+  "description": "App do aluno (React Native + Expo + TypeScript) - FASE 10.",
+  "main": "expo-router/entry",
+  "dependencies": {
+    "@expo/metro-runtime": "~57.0.13",
+    "@tanstack/react-query": "^5.102.3",
+    "expo": "~57.0.16",
+    "expo-audio": "~57.0.4",
+    "expo-constants": "~57.0.14",
+    "expo-file-system": "~57.0.5",
+    "expo-linking": "~57.0.7",
+    "expo-router": "~57.0.16",
+    "expo-secure-store": "~57.0.1",
+    "expo-status-bar": "~57.0.1",
+    "expo-video": "~57.0.2",
+    "music-tools": "0.1.0",
+    "react": "19.2.3",
+    "react-native": "0.86.2",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-reanimated": "4.5.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.0",
+    "shared": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/react": "~19.2.2",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.12",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "test": "jest"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$"
+  },
+  "private": true
+}

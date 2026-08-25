@@ -568,6 +568,157 @@ gateway_customer_id)` — mudança isolada, sem afetar `PaymentGateway`/`Subscri
   não muda: `endLiveStream()` continua sendo chamado de forma síncrona pela ação do professor, e
   `processRecordingWebhook()` continua sendo o único ponto que grava `recordingRef`.
 
+## 31. `packages/shared` finalmente populado — data sempre `string`, nunca `Date`
+
+- **Decisão:** cada domínio de `apps/api` (auth, catálogo, progresso, assinaturas, pagamentos,
+  playback, lives) ganhou um arquivo espelhado em `packages/shared/src/`, com os tipos exatos de
+  request/response — mantidos manualmente em sincronia com os DTOs/services reais (sem geração
+  automática nesta fase). Toda propriedade `DateTime` do Prisma é tipada como `string` (nunca
+  `Date`), porque é exatamente isso que chega ao cliente após a serialização JSON padrão do
+  Express/Nest — tipar como `Date` seria uma mentira que só apareceria como bug em runtime.
+- **Motivo:** `apps/mobile` é o primeiro consumidor real desses tipos (o pacote existia como
+  placeholder inerte desde a FASE 1); duplicar os tipos à mão dentro de `apps/mobile` reintroduziria
+  exatamente o risco de divergência que `packages/shared` existe para evitar.
+- **Alternativas consideradas:** gerar os tipos automaticamente a partir do Swagger/OpenAPI já
+  exposto por `apps/api` (`GET /docs`) (rejeitado por agora — adicionaria uma etapa de build/codegen
+  nova ao monorepo; reavaliar se a manutenção manual começar a divergir com frequência, já que o
+  contrato de API está razoavelmente estável neste ponto do roadmap).
+- **Impacto futuro:** qualquer mudança de contrato em `apps/api` deve atualizar o arquivo
+  correspondente aqui no mesmo PR — é responsabilidade de quem mexe na API, não deste pacote.
+
+## 32. Stack do app: `expo-router` + `@tanstack/react-query` + `expo-secure-store`
+
+- **Decisão:** navegação por arquivo (`expo-router`, já oficial/recomendado pelo Expo desde a SDK
+  50+), cache/estado de servidor via `@tanstack/react-query` (evita reimplementar
+  loading/erro/retry/cache à mão em cada tela), tokens de sessão em `expo-secure-store` (keychain/
+  keystore nativo — nunca `AsyncStorage` puro, que não é criptografado).
+- **Motivo:** todas as três são escolhas padrão de mercado para este tipo de app, bem documentadas,
+  com dependências oficiais/maduras — nenhuma reinventa algo que o ecossistema Expo já resolve bem.
+  `react-query` em particular evita duplicar em cada uma das ~15 telas a lógica de
+  loading/erro/retry que já existe uma vez em `api-client.ts` + a config global de `query-client.ts`.
+- **Alternativas consideradas:** React Navigation configurado manualmente em vez de `expo-router`
+  (rejeitado — mais boilerplate para o mesmo resultado, e `expo-router` já é o caminho recomendado
+  pela própria Expo); `useState`/`useEffect` manual para cada chamada de API em vez de `react-query`
+  (rejeitado — é exatamente o padrão que gerou o problema documentado na decisão 34, abaixo, quando
+  usado para algo que não é bootstrap único).
+- **Impacto futuro:** nenhum específico — é a base sobre a qual toda tela nova deste app deve ser
+  construída.
+
+## 33. `expo-video`/`expo-audio`, não `expo-av` (que está em manutenção desde a SDK 52)
+
+- **Decisão:** player de vídeo (aulas/lives) usa `expo-video` (`useVideoPlayer`/`VideoView`);
+  captura de microfone (afinador) e reprodução de clique (metrônomo) usam `expo-audio`
+  (`useAudioStream`/`useAudioPlayer`). `expo-av` não foi usado.
+- **Motivo:** a própria Expo divide `expo-av` em `expo-video` + `expo-audio` desde a SDK 52 e não
+  recomenda `expo-av` para projetos novos. Escrever código novo contra uma API em manutenção seria
+  dívida técnica already-known no dia em que foi escrita — mesmo raciocínio de "verificar
+  compatibilidade antes de gerar código" (regra 35 do prompt-mestre) já aplicado a Node/Prisma nas
+  decisões 4 e 7.
+- **Alternativas consideradas:** `expo-av` (rejeitado pelo motivo acima); biblioteca de terceiros
+  para áudio (ex. `react-native-track-player`) (rejeitado — adicionaria uma dependência nativa extra
+  fora do ecossistema Expo gerenciado sem necessidade, já que `expo-audio`/`expo-video` cobrem tudo
+  que este app precisa).
+- **Impacto futuro:** nenhum esperado — são os pacotes atualmente recomendados; se a Expo os
+  substituir de novo no futuro, a migração afeta só `use-lesson-player.ts`, `use-metronome.ts` e
+  `use-tuner.ts` (a lógica de domínio em `packages/music-tools` não muda).
+
+## 34. Ler o `.d.ts` instalado antes de escrever contra uma API nativa — achado real: `useAudioStream`
+
+- **Decisão:** antes de escrever qualquer código contra `expo-video`/`expo-audio`, os arquivos
+  `.d.ts` reais instalados em `node_modules` foram lidos diretamente (não só a memória/treinamento
+  do modelo) para confirmar a assinatura exata de cada hook/classe.
+- **Motivo:** essa verificação mudou o design do afinador para melhor: a suposição inicial era que
+  seria necessário um workaround (gravar clipes curtos em `.wav` e decodificar o PCM manualmente,
+  já que `expo-av` não expõe captura de áudio cru em tempo real). Ao ler `AudioStream.types.d.ts`,
+  ficou claro que `expo-audio`'s `useAudioStream` já entrega **PCM real e contínuo do microfone**
+  via callback `onBuffer` — o afinador não precisa de nenhum workaround, só passar o buffer direto
+  para `detectPitch()`. Sem essa checagem, o app teria sido escrito com uma limitação inexistente.
+- **Alternativas consideradas:** confiar na lembrança geral de como `expo-av`/APIs de áudio do Expo
+  costumavam funcionar (rejeitado — teria produzido uma implementação pior, com uma limitação
+  documentada que não é real nesta versão do SDK).
+- **Impacto futuro:** nenhuma limitação de captura de áudio precisa ser documentada para o afinador
+  (diferente do metrônomo — decisão 35). Reforça o hábito de verificar `node_modules/**/*.d.ts` ao
+  integrar qualquer API nativa nova neste app.
+
+## 35. Limitação aceita: precisão do clique do metrônomo depende do timer JS, não de um clock nativo
+
+- **Decisão:** `use-metronome.ts` documenta explicitamente (comentário no topo do arquivo + aviso na
+  tela) que, ao contrário do player web (Web Audio API com `AudioContext.currentTime`, um clock de
+  alta precisão independente do timer — seção 11 do prompt-mestre), o Expo gerenciado não expõe um
+  `AudioContext` real: o clique só pode soar no instante em que o `setTimeout` de fato dispara,
+  sujeito ao jitter normal do event loop JS. O agendamento (`MetronomeEngine.tick()`) continua
+  exato e testado; só a execução final do som herda a imprecisão da plataforma.
+- **Motivo:** documentar um limite real da plataforma como limite aceito (não como bug) é o mesmo
+  princípio já aplicado à granularidade do Loop A-B (~250ms na web, seção 10) e aos cents do
+  afinador (±5, seção 12) — a alternativa de fingir que o problema não existe seria pior do que
+  declará-lo.
+- **Alternativas consideradas:** escrever um módulo nativo customizado (Kotlin/Swift) para expor um
+  clock de áudio de alta precisão (rejeitado — sairia do Expo gerenciado, exigindo EAS
+  Build/development build; overengineering para o estágio atual do produto, sem terceiro
+  instrumento/professor pedindo essa precisão ainda); usar `expo-av`'s scheduling (rejeitado —
+  mesma limitação de manutenção da decisão 33, e não resolveria o problema de qualquer forma, já que
+  nenhuma API do Expo gerenciado expõe um `AudioContext` real).
+- **Impacto futuro:** se a precisão se tornar um requisito real (ex. professores de bateria
+  reclamando), a solução é migrar para um development build com um módulo de áudio nativo dedicado
+  — mudança isolada em `use-metronome.ts`, sem tocar em `MetronomeEngine` (`packages/music-tools`).
+
+## 36. `eslint-plugin-react-hooks` v7 revelou (e ajudou a corrigir) padrões reais no app
+
+- **Decisão:** o `.eslintrc.cjs` raiz nunca precisou de suporte a JSX (nenhum app React existia até
+  aqui) — `apps/mobile/.eslintrc.cjs` adiciona `ecmaFeatures.jsx` e `eslint-plugin-react-hooks` v7,
+  que já inclui as regras mais novas de "prontidão para o React Compiler"
+  (`react-hooks/refs`, `react-hooks/immutability`, `react-hooks/set-state-in-effect`). Duas delas
+  pegaram bugs reais e foram corrigidas (escrita de ref durante o render em
+  `use-lesson-player.ts`; ver commit). As outras duas ocorrências (mutação de `player.currentTime`
+  do `expo-video` e `loadProfile()` no bootstrap de `auth-context.tsx`) são padrões corretos e
+  documentados pela própria Expo/React — silenciadas com `eslint-disable-next-line` pontual e
+  comentário explicando o motivo, não um disable geral da regra.
+- **Motivo:** mesmo espírito da decisão 23 (o teste de smoke do `AppModule` encontrou o bug real de
+  `PORT`) — ferramentas de verificação mais rigorosas que o estritamente necessário valem a pena
+  quando pegam bugs de verdade, mesmo quando também produzem alguns falsos positivos que precisam
+  de julgamento para triar.
+- **Alternativas consideradas:** não adicionar `eslint-plugin-react-hooks` (rejeitado — deixaria de
+  pegar a escrita de ref durante o render, um bug real); desabilitar a regra inteira em vez de
+  silenciar linha a linha (rejeitado — perderia a cobertura da regra para código futuro que talvez
+  cometa o mesmo erro de verdade).
+- **Impacto futuro:** `apps/admin` (FASE 11, também React) deve seguir o mesmo padrão de override
+  local de ESLint, não duplicar a configuração dentro do `.eslintrc.cjs` raiz.
+
+## 37. Vulnerabilidade moderada em `uuid`/`xcode` (ferramenta de build do Expo) — aceita e monitorada
+
+- **Decisão:** `npm audit` acusa uma vulnerabilidade moderada em `uuid` (`GHSA-w5hq-g745-h8pq`),
+  puxada transitivamente por `xcode` → `@expo/config-plugins` → `@expo/cli`. Investigado (mesmo
+  método da decisão 7): é dependência **só de build-time** (`xcode` manipula arquivos de projeto
+  Xcode durante `expo prebuild`/`expo run:ios`), nunca executada em runtime do app nem exposta a
+  input do usuário final. A única correção automática (`npm audit fix --force`) rebaixaria `expo`
+  para `46.0.21` — uma versão de 15 SDKs atrás, quebrando toda a stack SDK 57 já instalada.
+- **Motivo:** downgrade massivo para corrigir uma vulnerabilidade de baixo risco real (ferramenta de
+  build local, não superfície de ataque em produção) seria uma troca claramente ruim — mesmo
+  raciocínio da decisão 7 ("a versão mais nova disponível é a que está vulnerável; a correção não
+  depende de qual versão 'mais atual' se escolhe").
+- **Alternativas consideradas:** aplicar `npm audit fix --force` (rejeitado pelo motivo acima);
+  ignorar o `npm audit` sem documentar (rejeitado — viola a regra 38 do prompt-mestre, que exige
+  tratar vulnerabilidades identificadas, e "tratar" aqui significa avaliar e documentar a decisão,
+  não necessariamente aplicar a correção automática quando ela é pior que o problema).
+- **Impacto futuro:** reavaliar quando a Expo publicar uma versão de `@expo/config-plugins` que
+  atualize `xcode`/`uuid` sem exigir downgrade do SDK.
+
+## 38. Lives no app do aluno são somente leitura — gerenciar uma live é do painel administrativo
+
+- **Decisão:** `liveSessionsApi` em `apps/mobile` só expõe `list`/`get`/`getPlaybackUrl`. Os
+  endpoints `go-live`/`end`/`cancel`/CRUD (`apps/api`, FASE 9) não têm nenhuma tela neste app.
+- **Motivo:** `docs/00-primeira-entrega.md` (seção 3) já descreve `apps/mobile` como "App do aluno"
+  — gerenciar uma transmissão é ação de professor/admin, que pertence ao painel administrativo
+  (`apps/admin`, FASE 11). Mesmo raciocínio de escopo já usado na decisão 26 (o player embutido
+  também segue essa mesma divisão app-por-papel).
+- **Alternativas consideradas:** expor as ações de gestão de live também no app mobile, escondidas
+  atrás de uma checagem de papel (`roles.includes('teacher')`) (rejeitado — misturaria a experiência
+  de "app do aluno" com fluxos de professor que fazem mais sentido numa tela maior/painel dedicado;
+  a API já valida a permissão de qualquer forma, então nada real se perde ao não duplicar a ação
+  aqui).
+- **Impacto futuro:** quando `apps/admin` (FASE 11) for criado, ele consome exatamente os endpoints
+  de gestão que este app deliberadamente não usa — nenhuma mudança de contrato de API necessária.
+
 ---
 
 ## Compatibilidade verificada nesta fase
