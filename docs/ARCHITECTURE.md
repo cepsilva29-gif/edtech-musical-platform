@@ -474,6 +474,40 @@ gateway_customer_id)` — mudança isolada, sem afetar `PaymentGateway`/`Subscri
   `GET /lessons/:id/playback` e implementam loop A-B/controles inteiramente no cliente — nenhuma
   mudança de contrato de API é esperada para isso.
 
+## 27. FASE 8 (metrônomo/afinador) vira um novo pacote (`packages/music-tools`), não `apps/api`
+
+- **Decisão:** metrônomo e afinador (seções 11/12 do prompt-mestre) são descritos como **100%
+  client-side** — nenhuma tabela no schema, nenhum endpoint de API. Diferente da FASE 7 (que tinha
+  uma fatia de backend genuína — resolução de URL assinada), a FASE 8 não tem nenhum trabalho
+  possível em `apps/api`. A parte que **é** possível e valiosa entregar agora — sem depender de
+  `apps/admin`/`apps/mobile` existirem — é exatamente a que a própria seção 11 já descreve como
+  separada: "motor abstraído... com estado puro... desacoplado da renderização". Essa parte
+  (`MetronomeEngine.tick()` como lookahead scheduling puro; `detectPitch()` via YIN sobre um
+  `Float32Array`; `matchNearestNote()`/cents; `TunerSmoother`) não depende de Web Audio API,
+  `getUserMedia`, DOM ou React Native — só de matemática determinística, 100% testável agora.
+- **Motivo:** mesmo raciocínio já usado nas decisões 20/25 (`PaymentGateway`/`VideoProvider`):
+  implementar agora o que é genuinamente testável e adiar só a integração que depende de algo que
+  ainda não existe (aqui, os apps cliente; lá, credenciais de gateway/vídeo). `packages/shared` foi
+  descartado como destino porque seu escopo documentado (`README.md` do pacote,
+  `docs/00-primeira-entrega.md` seção 3) é estritamente "tipos/DTOs compartilhados — contratos de
+  API"; motor de metrônomo/afinador não é um contrato de API (`apps/api` não tem nenhuma relação
+  com esse domínio) — misturar os dois violaria a separação de responsabilidade que o próprio
+  `packages/shared` já declara.
+- **Alternativas consideradas:** não entregar nada nesta fase até `apps/admin`/`apps/mobile`
+  existirem (rejeitado — o motor puro é genuinamente buildável e testável agora, adiar seria deixar
+  trabalho real na mesa sem necessidade); colocar o código dentro de `packages/shared` (rejeitado —
+  ver motivo acima); criar `apps/admin` ou `apps/mobile` prematuramente só para ter onde colocar o
+  motor (rejeitado — antecipar o scaffold de um app inteiro, com todas as decisões de framework que
+  isso implica, só para hospedar ~400 linhas de lógica pura, seria overengineering na direção
+  oposta: adiantar decisão de FASE 10/11 sem necessidade).
+- **Impacto futuro:** quando `apps/admin` (Next.js/Web Audio API) e `apps/mobile` (Expo/áudio
+  nativo) forem criados, ambos importam `music-tools` como dependência de workspace e implementam
+  só a ponta de I/O (captura de microfone, agendamento real de áudio, UI) — o algoritmo em si não
+  muda. Se o afinador precisar suportar outros instrumentos além de violão/guitarra (o "Cordas"
+  também cobre isso, mas Teclado/Piano e Bateria não têm um conceito de "afinação por corda"),
+  `matchNearestNote()` já aceita um `tuning` alternativo como parâmetro — não precisa mudar a
+  assinatura.
+
 ---
 
 ## Compatibilidade verificada nesta fase

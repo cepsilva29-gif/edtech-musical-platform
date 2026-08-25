@@ -16,17 +16,18 @@ player, metrônomo, afinador, segurança, testes, deploy) está em:
 
 ```
 apps/
-  api/       Backend NestJS + TypeScript (FASE 3+)
-  admin/     Painel administrativo Next.js (FASE 11+)
-  mobile/    App do aluno React Native/Expo (FASE 10+)
+  api/          Backend NestJS + TypeScript (FASE 3+)
+  admin/        Painel administrativo Next.js (FASE 11+)
+  mobile/       App do aluno React Native/Expo (FASE 10+)
 packages/
-  shared/    Tipos/DTOs compartilhados entre api/admin/mobile
-  config/    Schemas de validação de variáveis de ambiente
+  shared/       Tipos/DTOs compartilhados entre api/admin/mobile
+  config/       Schemas de validação de variáveis de ambiente
+  music-tools/  Motores de metrônomo e afinador — estado/algoritmo puros (FASE 8)
 infra/
-  docker/    Dockerfiles e docker-compose (FASE 13+)
-  nginx/     Reverse proxy de produção (FASE 13+)
-docs/        Documentação técnica e de arquitetura
-tests/e2e/   Testes ponta-a-ponta cross-app (FASE 12+)
+  docker/       Dockerfiles e docker-compose (FASE 13+)
+  nginx/        Reverse proxy de produção (FASE 13+)
+docs/           Documentação técnica e de arquitetura
+tests/e2e/      Testes ponta-a-ponta cross-app (FASE 12+)
 ```
 
 Cada pasta ainda vazia tem um `README.md` explicando o que será criado nela e em qual fase — não
@@ -38,7 +39,7 @@ há nenhum arquivo "fictício" além dessas explicações.
   v24.19.0, compatível nesta fase)
 - npm `>=10`
 
-## Como executar (estado atual — FASE 7)
+## Como executar (estado atual — FASE 8)
 
 ```bash
 npm install
@@ -58,6 +59,12 @@ npm run prisma:seed
 npm run start:dev             # http://localhost:3000 (Swagger em /docs)
 ```
 
+Motores de metrônomo/afinador (sem servidor, sem banco — ver `packages/music-tools/README.md`):
+
+```bash
+npm test --workspace=music-tools
+```
+
 ## Roadmap
 
 | Fase | Escopo                         | Status                      |
@@ -68,9 +75,9 @@ npm run start:dev             # http://localhost:3000 (Swagger em /docs)
 | 4    | Cursos, módulos e aulas        | ✅ concluída                |
 | 5    | Controle de acesso e progresso | ✅ concluída                |
 | 6    | Assinaturas e pagamentos       | ✅ concluída                |
-| 7    | Player de vídeo                | ✅ concluída (esta entrega) |
-| 8    | Metrônomo e afinador           | aguardando autorização      |
-| 9    | Lives                          | —                           |
+| 7    | Player de vídeo                | ✅ concluída                |
+| 8    | Metrônomo e afinador           | ✅ concluída (esta entrega) |
+| 9    | Lives                          | aguardando autorização      |
 | 10   | Aplicativo mobile              | —                           |
 | 11   | Painel administrativo          | —                           |
 | 12   | Testes                         | —                           |
