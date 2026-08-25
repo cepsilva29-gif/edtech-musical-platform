@@ -1,31 +1,23 @@
-import { CanActivate, INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { ThrottlerGuard } from '@nestjs/throttler';
 import { AppModule } from '../../src/app.module';
 import { HttpExceptionFilter } from '../../src/common/filters/http-exception.filter';
 import { ResponseInterceptor } from '../../src/common/interceptors/response.interceptor';
 
-const noopGuard: CanActivate = { canActivate: () => true };
-
 /**
  * Bootstrap de teste que espelha os pipes/filtros/interceptor globais de `src/main.ts` (mesmo
  * envelope de resposta `{success,data|error}`, mesma validacao de DTO) - so omite helmet/CORS/
- * Swagger, que nao afetam o comportamento testado aqui. Os guards globais Jwt/Roles vem do proprio
- * `AppModule` (registrados via `APP_GUARD`) sem alteracao - so o `ThrottlerGuard` e substituido por
- * um no-op.
+ * Swagger, que nao afetam o comportamento testado aqui. Os guards globais (Jwt/Roles/Throttler) ja
+ * vem do proprio `AppModule` (registrados via `APP_GUARD`), sem overrides aqui.
  *
- * `ThrottlerGuard` desativado de proposito (achado real: primeira execucao do CI estourou o
- * throttle de `POST /auth/register`, 5/60s - cada arquivo de teste registra varios usuarios por
- * `it()`, o que o limite de producao nunca foi desenhado para suportar). O limite em si ja e
- * uma regra de seguranca deliberada e nao e o que estes testes de integracao existem para
- * verificar - eles testam o comportamento das rotas, nao o throttler (uma dependencia de
- * terceiros). Ver decisao correspondente em docs/ARCHITECTURE.md.
+ * O rate limiting de `POST /auth/register` (5/60s) fica desativado automaticamente quando
+ * `NODE_ENV=test` (ja setado por `test/setup-env.ts`/CI) via `AppThrottlerGuard` - ver
+ * `src/common/guards/app-throttler.guard.ts`. `Test.createTestingModule(...).overrideGuard(...)`
+ * foi tentado antes e nao teve efeito (achado real via CI); a correcao deterministica ficou no
+ * proprio guard, nao no bootstrap de teste.
  */
 export async function createTestApp(): Promise<INestApplication> {
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-    .overrideGuard(ThrottlerGuard)
-    .useValue(noopGuard)
-    .compile();
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication();
 
   app.setGlobalPrefix('api/v1', { exclude: ['health', 'ready'] });

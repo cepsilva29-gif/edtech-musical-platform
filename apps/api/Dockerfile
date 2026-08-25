@@ -37,6 +37,13 @@ RUN npm ci
 FROM deps AS build
 ENV DATABASE_URL="postgresql://user:pass@localhost:5432/db"
 RUN npm run prisma:generate --workspace=apps/api
+RUN echo "--- DEBUG ---" \
+ && pwd \
+ && node -e "console.log('resolve @nestjs/common:', require.resolve('@nestjs/common'))" \
+ && node -p "require('typescript').version" \
+ && cat apps/api/node_modules/.bin/tsc 2>&1 | head -3 || true \
+ && cd apps/api && pwd && node -e "console.log('resolve from apps/api:', require.resolve('@nestjs/common'))" \
+ && echo "--- END DEBUG ---"
 RUN npm run build --workspace=apps/api
 RUN npm prune --omit=dev
 
