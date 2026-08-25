@@ -54,7 +54,17 @@ export async function registerWithRoles(
   overrides: Partial<{ name: string; email: string; password: string }> = {},
 ): Promise<RegisteredUser> {
   const registered = await registerStudent(app, overrides);
-  await app.get(UsersService).setRoles(registered.id, roles);
+  // `setRoles` agora exige um ator para o audit log (FASE 14, decisao correspondente em
+  // docs/ARCHITECTURE.md) - em teste nao ha um admin "de verdade" arranjando o cenario, entao o
+  // proprio usuario registrado serve de ator só para preencher o campo, nao é uma checagem de
+  // autorizacao real (esta chamada pula a camada HTTP/RolesGuard de proposito).
+  await app
+    .get(UsersService)
+    .setRoles(
+      { id: registered.id, email: registered.email, roles: ['student'] },
+      registered.id,
+      roles,
+    );
 
   const password = overrides.password ?? 'SenhaForte123';
   const login = await request(app.getHttpServer())

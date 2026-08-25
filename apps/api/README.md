@@ -278,7 +278,7 @@ npm run start:dev             # sobe a API em http://localhost:3000 (Swagger em 
 > **Nota de ambiente:** este projeto foi desenvolvido em uma sandbox sem PostgreSQL nem acesso de
 > rede de saída disponíveis. O que **foi** verificado de fato: `prisma validate`/`generate`,
 > `tsc --noEmit`, `nest build` (gera `dist/main.js` funcional), lint limpo, `prettier --check` limpo,
-> os 57 testes unitários (`npm test`) e um teste adicional que resolve o grafo de DI do `AppModule`
+> os 59 testes unitários (`npm test`) e um teste adicional que resolve o grafo de DI do `AppModule`
 > inteiro sem precisar de Postgres (`app.module.smoke.spec.ts`) — todos passando. Foi esse último
 > teste que revelou e permitiu corrigir um bug real de conversão de `PORT` (decisão 23 em
 > `docs/ARCHITECTURE.md`) que impediria o boot da API em qualquer ambiente real. O que **não** foi
@@ -302,13 +302,14 @@ Credenciais de desenvolvimento criadas pelo seed (senha única: `Dev@12345`):
 npm test
 ```
 
-57 testes unitários: `RolesGuard` (RBAC), `resolveErrorBody` (garante que erros internos não vazam
+59 testes unitários: `RolesGuard` (RBAC), `resolveErrorBody` (garante que erros internos não vazam
 detalhe em produção), `catalog-visibility.util` (regras puras de propriedade/publicação do
 catálogo, FASE 4, incluindo `isOwnerOrAdmin` reaproveitada por lives — decisão 28),
 `AccessControlService` (regra de entitlement e `assertEntitled`, FASE 5/7), `env.validation`
 (coerção/validação de variáveis de ambiente), `date-interval.util` e `FakePaymentGateway` (FASE 6),
-`FakeVideoProvider` (FASE 7), `live-status-transition.util` e `FakeLiveProvider` (FASE 9), mais o
-smoke test de DI do `AppModule`.
+`FakeVideoProvider` (FASE 7), `live-status-transition.util` e `FakeLiveProvider` (FASE 9),
+`UsersService` (`setRoles`/`setStatus` gravam audit log com o ator, o antes e o depois — FASE 14),
+mais o smoke test de DI do `AppModule`.
 
 ## Testes de integração — FASE 12
 

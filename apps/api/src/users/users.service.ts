@@ -5,7 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, UserStatus } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { paginationArgs, PaginatedResult, toPaginatedResult } from '../common/utils/pagination';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
 
@@ -33,7 +35,10 @@ interface CreateStudentInput {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   findByEmail(email: string) {
     return this.prisma.user.findUnique({ where: { email }, ...userWithRoles });
@@ -125,9 +130,19 @@ export class UsersService {
     );
   }
 
-  /** Substitui integralmente os papeis do usuario (ex.: promover a professor). */
-  async setRoles(userId: string, roleNames: string[]): Promise<UserWithRoles> {
-    await this.findByIdOrThrow(userId);
+  /**
+   * Substitui integralmente os papeis do usuario (ex.: promover a professor). Auditado (FASE 14 -
+   * escalonamento/rebaixamento de privilegio e exatamente o tipo de "acao sensivel" que a secao 13
+   * do prompt-mestre exige registrar - achado real na auditoria final: so `auth.service.ts` gravava
+   * audit log ate aqui).
+   */
+  async setRoles(
+    actor: AuthenticatedUser,
+    userId: string,
+    roleNames: string[],
+    ip?: string | null,
+  ): Promise<UserWithRoles> {
+    const before = await this.findByIdOrThrow(userId);
 
     const uniqueNames = Array.from(new Set(roleNames));
     const roles = await this.prisma.role.findMany({ where: { name: { in: uniqueNames } } });
@@ -142,14 +157,46 @@ export class UsersService {
       this.prisma.userRole.createMany({ data: roles.map((role) => ({ userId, roleId: role.id })) }),
     ]);
 
-    return this.findByIdOrThrow(userId);
+    const after = await this.findByIdOrThrow(userId);
+    await this.auditService.record({
+      userId: actor.id,
+      action: 'user.roles_updated',
+      entity: 'user',
+      entityId: userId,
+      metadata: {
+        before: UsersService.toRoleNames(before),
+        after: UsersService.toRoleNames(after),
+      },
+      ip,
+    });
+
+    return after;
   }
 
-  /** Bloqueia/reativa um usuario (UserStatus.BLOCKED/ACTIVE). */
-  async setStatus(userId: string, status: UserStatus): Promise<UserWithRoles> {
-    await this.findByIdOrThrow(userId);
+  /**
+   * Bloqueia/reativa um usuario (UserStatus.BLOCKED/ACTIVE). Auditado pelo mesmo motivo de
+   * `setRoles` acima.
+   */
+  async setStatus(
+    actor: AuthenticatedUser,
+    userId: string,
+    status: UserStatus,
+    ip?: string | null,
+  ): Promise<UserWithRoles> {
+    const before = await this.findByIdOrThrow(userId);
     await this.prisma.user.update({ where: { id: userId }, data: { status } });
-    return this.findByIdOrThrow(userId);
+    const after = await this.findByIdOrThrow(userId);
+
+    await this.auditService.record({
+      userId: actor.id,
+      action: 'user.status_updated',
+      entity: 'user',
+      entityId: userId,
+      metadata: { before: before.status, after: after.status },
+      ip,
+    });
+
+    return after;
   }
 
   static toRoleNames(user: { userRoles: { role: { name: string } }[] }): string[] {

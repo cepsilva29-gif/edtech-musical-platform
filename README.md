@@ -39,7 +39,7 @@ há nenhum arquivo "fictício" além dessas explicações.
   v24.19.0, compatível nesta fase)
 - npm `>=10`
 
-## Como executar (estado atual — FASE 13)
+## Como executar (estado atual — FASE 14, roadmap completo)
 
 ```bash
 npm install
@@ -110,5 +110,32 @@ docker compose -f infra/docker/docker-compose.yml run --rm migrate   # prisma mi
 | 10   | Aplicativo mobile              | ✅ concluída                |
 | 11   | Painel administrativo          | ✅ concluída                |
 | 12   | Testes                         | ✅ concluída                |
-| 13   | Docker e produção              | ✅ concluída (esta entrega) |
-| 14   | Auditoria final                | aguardando autorização      |
+| 13   | Docker e produção              | ✅ concluída                |
+| 14   | Auditoria final                | ✅ concluída (esta entrega) |
+
+## Status do projeto e limitações conhecidas
+
+As 14 fases do roadmap estão concluídas. Antes de considerar isto pronto para produção de verdade,
+leia com atenção:
+
+- **Provedores de pagamento/vídeo/live são simulações (`fake`), não integrações reais.** O contrato
+  (`PaymentGateway`/`VideoProvider`/`LiveProvider`) e o pipeline de webhook são os mesmos que um
+  provedor real usaria — só falta escrever o adapter concreto (Stripe/Asaas/Pagar.me, Mux/AWS IVS,
+  etc.) e trocar a variável de ambiente correspondente (`PAYMENT_PROVIDER`/`VIDEO_PROVIDER`/
+  `LIVE_PROVIDER`). Ver decisões 3/17/20/25 em `docs/ARCHITECTURE.md`.
+- **Nada de banco de dados, Docker ou rede externa foi executado nesta sandbox de desenvolvimento.**
+  Todo teste que depende de Postgres real (integração de `apps/api`, E2E de `tests/e2e`) e todo
+  Docker/CI (`infra/`, `.github/workflows/ci.yml`) foi escrito e verificado por `tsc`/`eslint`/
+  `prettier`/build, mas **não** executado de fato — cada README relevante documenta exatamente como
+  rodar essas verificações no seu ambiente. Rode-as antes de um deploy real.
+- **Auditoria de segurança final (FASE 14)** revisou o código contra o checklist de
+  `docs/00-primeira-entrega.md` (seção 13) e corrigiu duas lacunas reais: ações administrativas
+  sensíveis (promover/rebaixar papel, bloquear/reativar conta) não geravam log de auditoria, e a
+  configuração de CORS tinha uma opção não usada e tecnicamente inválida (`credentials: true` com
+  origem `*`). Ver decisões 57-59 em `docs/ARCHITECTURE.md` para o checklist completo e o que ficou
+  documentado como débito técnico conhecido (não escondido) em vez de corrigido.
+- **TLS não está configurado** — `infra/nginx` escuta HTTP puro de propósito (ver
+  `infra/nginx/README.md`); um certificado real depende do ambiente de deploy.
+
+Cada `README.md` de cada app/pacote também documenta, na sua própria seção "O que foi verificado
+nesta sandbox", exatamente o que foi e não foi possível testar de fato ali.

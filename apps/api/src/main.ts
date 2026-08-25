@@ -13,9 +13,14 @@ async function bootstrap(): Promise<void> {
 
   app.useLogger(app.get(Logger));
   app.use(helmet());
+  // `credentials: true` fica de fora de proposito: nenhum cliente (apps/admin/apps/mobile) usa
+  // cookie para autenticacao (JWT vai no header Authorization - decisoes 8/32/41), entao nao ha
+  // credential de fato cruzando origem. Mantido junto de CORS_ORIGIN='*' (default de
+  // desenvolvimento) violaria a propria especificacao de CORS (Access-Control-Allow-Credentials
+  // nao pode ser combinado com Access-Control-Allow-Origin: *) - achado da auditoria final (FASE
+  // 14), corrigido removendo a opcao nao usada em vez de restringir CORS_ORIGIN.
   app.enableCors({
     origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*',
-    credentials: true,
   });
   app.setGlobalPrefix('api/v1', { exclude: ['health', 'ready'] });
   app.useGlobalPipes(

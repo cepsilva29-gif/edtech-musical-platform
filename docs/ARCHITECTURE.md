@@ -1055,13 +1055,13 @@ apps/api`) é um caminho conhecido por ter comportamento inconsistente entre ver
 - **Decisão:** o workflow de CI (lint/typecheck, testes unitários, testes de integração contra um
   Postgres de serviço do próprio GitHub Actions, build das duas imagens Docker) foi escrito e
   commitado mesmo este repositório não tendo um remote GitHub configurado nesta sandbox.
-- **Motivo:** `docs/00-primeira-entrega.md` (seção 15) já pede explicitamente "CI/CD: lint + testes
-  - build de imagem a cada PR" como parte do escopo da FASE 13 — o arquivo fica pronto e correto
-    sintaticamente para o momento em que o repositório for de fato publicado no GitHub, em vez de
-    adiar essa parte da fase só por não haver um remote agora. Os testes de integração usam o recurso
-    nativo de "service containers" do GitHub Actions (Postgres como serviço do job, não Docker-in-
-    Docker) — funciona independente de o runner ter o daemon Docker exposto ao workflow da forma como
-    os `docker build` da imagem final precisam.
+- **Motivo:** `docs/00-primeira-entrega.md` (seção 15) já pede explicitamente lint, testes e build
+  de imagem a cada PR como parte do escopo da FASE 13 — o arquivo fica pronto e correto
+  sintaticamente para o momento em que o repositório for de fato publicado no GitHub, em vez de
+  adiar essa parte da fase só por não haver um remote agora. Os testes de integração usam o recurso
+  nativo de "service containers" do GitHub Actions (Postgres como serviço do job, não Docker-in-
+  Docker) — funciona independente de o runner ter o daemon Docker exposto ao workflow da forma como
+  os `docker build` da imagem final precisam.
 - **Alternativas consideradas:** não escrever CI nesta fase, deixando para quando houver um remote
   (rejeitado — a seção 15 já define isso como parte do escopo da própria FASE 13, não de uma fase
   futura; adiar sem necessidade real contradiz o próprio roadmap).
@@ -1069,6 +1069,81 @@ apps/api`) é um caminho conhecido por ter comportamento inconsistente entre ver
   (sem Docker/Actions runner nesta sandbox) nem num Actions real (sem remote). Antes de confiar
   nele, publique o repositório no GitHub e observe a primeira execução real do workflow, corrigindo
   qualquer detalhe de sintaxe/comportamento que só aparece rodando de fato.
+
+## 57. Auditoria final (FASE 14): `setRoles`/`setStatus` não gravavam audit log — corrigido
+
+- **Decisão:** `UsersService.setRoles`/`setStatus` (endpoints administrativos da decisão 40) agora
+  recebem o usuário autenticado que executa a ação (`actor`) e o IP da requisição, e gravam um
+  `AuditService.record(...)` com `action: 'user.roles_updated'`/`'user.status_updated'`,
+  `entityId` do usuário afetado e `metadata: { before, after }` (papéis ou status antes/depois da
+  mudança). Coberto por um novo `users.service.spec.ts` (2 testes).
+- **Motivo:** `docs/00-primeira-entrega.md` (seção 13, "Estratégia de segurança") exige
+  explicitamente "logs de auditoria para ações sensíveis". Ao auditar sistematicamente todo
+  `grep -rl AuditService apps/api/src` nesta fase, só `auth.service.ts` (registro/login/logout-all/
+  troca e redefinição de senha/confirmação de e-mail, desde a FASE 3) gravava qualquer coisa —
+  escalonar/rebaixar o papel de um usuário (inclusive conceder `admin`) e bloquear/reativar uma
+  conta, ambos adicionados na FASE 11 sem passar por este mesmo checklist, ficaram sem trilha de
+  auditoria. Este é o achado de maior severidade real desta auditoria: são exatamente as duas ações
+  administrativas com maior potencial de abuso/necessidade de investigação forense (quem promoveu
+  quem a admin, e quando; quem bloqueou a conta de quem, e por quê).
+- **Alternativas consideradas:** auditar também o CRUD de catálogo/planos/lives (instrumentos,
+  cursos, módulos, aulas, materiais, planos de assinatura, sessões ao vivo) na mesma varredura
+  (parcialmente rejeitado por proporcionalidade — são ações de conteúdo, não de controle de acesso
+  ou dinheiro; o risco de abuso e a necessidade de trilha forense são ordens de grandeza menores que
+  escalonar privilégio ou mover dinheiro/assinatura, que já são cobertos: assinaturas por
+  `auth.service.ts`/webhooks de pagamento, que já eram auditados via o próprio registro de
+  `payment_webhook_events`). **Gap remanescente documentado, não escondido:** o CRUD de catálogo/
+  planos/lives continua sem `AuditService.record` explícito — fica registrado aqui como débito
+  técnico conhecido, não descoberto tarde.
+- **Impacto futuro:** se o volume de conteúdo gerenciado crescer a ponto de precisar de uma trilha
+  de "quem editou o quê" (não só "quem pode editar", que o RBAC já garante), adicionar
+  `AuditService.record` ao CRUD de catálogo/planos/lives seguindo exatamente o mesmo padrão desta
+  decisão.
+
+## 58. Auditoria final: `credentials: true` do CORS removido — não usado e incompatível com `origin: '*'`
+
+- **Decisão:** `app.enableCors({...})` em `src/main.ts` não passa mais `credentials: true`.
+- **Motivo:** nenhum cliente (`apps/admin`, `apps/mobile`) autentica via cookie — o JWT sempre vai
+  no header `Authorization` (decisões 8/32/41), então não existe credencial de fato cruzando
+  origem para o CORS proteger. Mantida, a opção só criava uma configuração inválida pela própria
+  especificação de CORS quando `CORS_ORIGIN` não está setada (`.env.example` já documenta o default `*` para desenvolvimento): a
+  especificação CORS proíbe `Access-Control-Allow-Credentials: true` junto de
+  `Access-Control-Allow-Origin: *`. Não quebrava nada na prática (nenhum cliente atual envia
+  `credentials: 'include'` em suas chamadas `fetch`), mas era uma configuração "errada que
+  funciona por acidente" — exatamente o tipo de coisa que uma auditoria final deve pegar antes que
+  alguém dependa dela sem saber.
+- **Alternativas consideradas:** manter `credentials: true` e restringir `CORS_ORIGIN` para nunca
+  aceitar `*` (rejeitado — mudaria o comportamento de desenvolvimento sem necessidade real, já que
+  a opção em si não é usada por nenhum cliente; remover a opção não usada é a correção mínima e
+  correta).
+- **Impacto futuro:** se um cliente futuro precisar de autenticação por cookie (ex. um app que
+  precise de SSR autenticado — ver decisão 39 sobre por que `apps/admin` não faz isso hoje),
+  reavaliar `credentials: true` nesse momento, com uma lista explícita de origens (nunca `*`).
+
+## 59. Auditoria final: checklist da seção 13 (segurança) revisado item a item, sem gaps novos
+
+- **Decisão:** cada item da "Estratégia de segurança" (`docs/00-primeira-entrega.md`, seção 13) foi
+  conferido contra o código de verdade, não só contra a memória de tê-lo implementado em fases
+  anteriores: JWT + refresh rotativo (decisão 8, testado desde a FASE 12), RBAC em toda rota
+  sensível (toda mutação administrativa grepada manualmente — nenhum `@Post`/`@Patch`/`@Delete`
+  sensível ficou sem `@Roles`/`@Public` explícito), hash de senha forte (bcryptjs, 12 salt rounds),
+  rate limiting (decisão 9 - em memória, não Redis, aceito e já documentado), CORS restrito por
+  ambiente (decisão 58 acima), Helmet (`main.ts`), validação/sanitização de entrada
+  (`ValidationPipe` global com `whitelist`/`forbidNonWhitelisted`), proteção contra SQL injection
+  (Prisma parametrizado em toda parte — o único `$queryRaw` de produção é um `SELECT 1` sem
+  interpolação, em `health.controller.ts`), autorização sempre revalidada no backend (nenhuma regra
+  de negócio confiada a um payload do frontend), logs de auditoria (decisão 57 acima), verificação
+  de assinatura em todo webhook (`payments`/`live-sessions`, ambos HMAC), sem dado de cartão
+  armazenado (schema nunca teve um campo de cartão), sem stack trace exposto em produção
+  (`resolveErrorBody` checa `NODE_ENV`, testado desde a FASE 3).
+- **Motivo:** uma auditoria final que só relê a documentação já escrita, sem reconferir contra o
+  código, corre o risco de confirmar decisões que ficaram desatualizadas silenciosamente (foi
+  assim que o gap da decisão 57 apareceu — o código de `auth.service.ts` nunca mudou, mas
+  `users.service.ts` cresceu sem seguir o mesmo padrão).
+- **Alternativas consideradas:** nenhuma — este item documenta o processo da auditoria em si, não
+  uma escolha de design.
+- **Impacto futuro:** repetir esta varredura sempre que uma nova rota administrativa/sensível for
+  adicionada, não só no fim de um ciclo de fases.
 
 ---
 

@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Request } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.interface';
@@ -35,15 +36,25 @@ export class UsersController {
 
   @Roles('admin')
   @Patch(':id/roles')
-  async updateRoles(@Param('id') id: string, @Body() dto: UpdateUserRolesDto) {
-    const updated = await this.usersService.setRoles(id, dto.roles);
+  async updateRoles(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateUserRolesDto,
+    @Req() req: Request,
+  ) {
+    const updated = await this.usersService.setRoles(actor, id, dto.roles, req.ip);
     return UsersService.toAdminView(updated);
   }
 
   @Roles('admin')
   @Patch(':id/status')
-  async updateStatus(@Param('id') id: string, @Body() dto: UpdateUserStatusDto) {
-    const updated = await this.usersService.setStatus(id, dto.status);
+  async updateStatus(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateUserStatusDto,
+    @Req() req: Request,
+  ) {
+    const updated = await this.usersService.setStatus(actor, id, dto.status, req.ip);
     return UsersService.toAdminView(updated);
   }
 }
